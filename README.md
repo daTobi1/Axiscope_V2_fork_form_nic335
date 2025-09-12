@@ -162,7 +162,17 @@ cors_domains:
 <img style="padding-bottom: 10px;" src="media/CapturePosChangeT1.gif" alt="Alt text" width="500"/><br/>
 <img style="padding-bottom: 10px;" src="media/GrabOffset.gif" alt="Alt text" width="500"/><br/>
 
-## Troubleshooting FAQ
+## Troubleshooting And FAQ
+### Camera is not shown in Axiscope
+The camera needs to be configured and also configured in mainsail
+This following links will guide you thru installing and configuring the camera in crowsness and fluid and mainsail
+
+[https://mellow.klipper.cn/en/docs/DebugDoc/BasicTutorial/camera/](https://mellow.klipper.cn/en/docs/DebugDoc/BasicTutorial/camera/)
+
+[Configuring the camera in Mainsail](https://docs.mainsail.xyz/overview/settings/webcams)
+
+### Camera only load if they where plug before rebooting the printer.
+Some camera wont be auto-detected by crowsnest automaticaly. You can simply restart crowsnest instead of rebooting the printer.
 
 ### Error: Duplicate chip name 'probe_multi_axis'
 

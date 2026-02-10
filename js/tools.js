@@ -263,6 +263,14 @@ function getProbeResults() {
 }
 
 function getProbeResultForTool(probeResults, toolNumber) {
+  const asString = String(toolNumber);
+  const asNumber = Number(toolNumber);
+  const asToolName = `T${asString}`;
+  return probeResults?.[toolNumber]
+    ?? probeResults?.[asString]
+    ?? probeResults?.[asNumber]
+    ?? probeResults?.[asToolName]
+    ?? null;
   return probeResults?.[toolNumber] ?? probeResults?.[String(toolNumber)] ?? probeResults?.[Number(toolNumber)] ?? null;
 }
 
@@ -402,9 +410,10 @@ function getTools() {
     $.get(url, function(data){
       $("#tool-list").html('');
       $.each(tool_numbers, function(i) {
-        var tool_number = data['result']['status'][tool_names[i]]['tool_number'];
-        var cx_offset   = data['result']['status'][tool_names[i]]['gcode_x_offset'].toFixed(3);
-        var cy_offset   = data['result']['status'][tool_names[i]]['gcode_y_offset'].toFixed(3);
+        const toolStatus = data?.result?.status?.[tool_names[i]] || {};
+        var tool_number = Number(toolStatus['tool_number'] ?? tool_numbers[i]);
+        var cx_offset   = Number(toolStatus['gcode_x_offset'] ?? 0).toFixed(3);
+        var cy_offset   = Number(toolStatus['gcode_y_offset'] ?? 0).toFixed(3);
         var disabled    = "";
         var tc_disabled = "disabled";
 
@@ -420,6 +429,11 @@ function getTools() {
         }
       });
 
+      // Always add calibration button after all tools.
+      $("#tool-list").append(calibrateButton(true, tool_numbers));
+
+      // Trigger one initial status read to show Z fields and populate values.
+      updateAllProbeResults();
       // Add calibration button after all tools
       getProbeResults().then(() => {
         // Calibration should stay triggerable even if probe results are empty.
@@ -476,12 +490,28 @@ function getTools() {
           });
         });
       });
+    }).fail(function(error) {
+      console.error('Error loading tool status:', error);
+      // Keep UI usable even if detail query fails.
+      $("#tool-list").html('');
+      $.each(tool_numbers, function(i) {
+        const tool_number = Number(tool_numbers[i]);
+        if (tool_number === 0) {
+          $("#tool-list").append(zeroListItem({tool_number: tool_number, disabled: "", tc_disabled: ""}));
+        } else {
+          $("#tool-list").append(nonZeroListItem({tool_number: tool_number, cx_offset: '0.000', cy_offset: '0.000', disabled: "", tc_disabled: ""}));
+        }
+      });
+      $("#tool-list").append(calibrateButton(true, tool_numbers));
+      updateAllProbeResults();
     });
 
     updateTools(tool_numbers, active_tool);
     
     // Start periodic updates after initial tool load
     startProbeResultsUpdates();
+  }).fail(function(error) {
+    console.error('Error loading toolchanger status:', error);
   });
 }
 

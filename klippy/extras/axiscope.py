@@ -77,7 +77,11 @@ class Axiscope:
         return tolerance
 
     def _parse_samples_max_count(self, config):
-        max_count_value = config.get('samples_max_count', str(self.samples))
+        # Backward compatibility: also accept legacy key name `max_samples`
+        # if users copied it from older examples.
+        max_count_value = config.get('samples_max_count', None)
+        if max_count_value is None:
+            max_count_value = config.get('max_samples', str(self.samples))
         try:
             max_count = int(max_count_value)
         except ValueError:

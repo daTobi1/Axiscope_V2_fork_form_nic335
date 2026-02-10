@@ -82,6 +82,7 @@ z_move_speed: 10          # OPTIONAL - Z movement speed in mm/s (default: 10)
 samples: 10               # OPTIONAL - Minimum number of probe samples (default: 10)
 samples_tolerance: 0.02   # OPTIONAL - Max allowed spread between samples in mm (default: 0.02)
 samples_max_count: 15     # OPTIONAL - Max samples before calibration aborts (default: samples)
+# max_samples: 15         # LEGACY alias for samples_max_count (still accepted)
 start_gcode: M118 Starting calibration G28 -> QGL -> G28Z
              G28
              QUAD_GANTRY_LEVEL

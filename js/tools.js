@@ -250,6 +250,10 @@ function getProbeResults() {
       // Show Z rows whenever Axiscope object is available.
       $('.z-fields').removeClass('d-none');
       return axiscopeStatus.probe_results || {};
+    const hasProbeResults = data.result?.status?.axiscope?.probe_results != null;
+
+    if (hasProbeResults) {
+      return data.result.status.axiscope.probe_results;
     }
     return {};
   }).catch(function(error) {
@@ -267,6 +271,7 @@ function getProbeResultForTool(probeResults, toolNumber) {
     ?? probeResults?.[asNumber]
     ?? probeResults?.[asToolName]
     ?? null;
+  return probeResults?.[toolNumber] ?? probeResults?.[String(toolNumber)] ?? probeResults?.[Number(toolNumber)] ?? null;
 }
 
 function updateProbeResults(tool_number, probeResults) {
@@ -429,6 +434,23 @@ function getTools() {
         const cy_offset = Number(toolStatus['gcode_y_offset'] ?? 0).toFixed(3);
         $(`#T${tool_number}-x-offset`).find('>:first-child').text(cx_offset);
         $(`#T${tool_number}-y-offset`).find('>:first-child').text(cy_offset);
+        const toolStatus = data?.result?.status?.[tool_names[i]] || {};
+        var tool_number = Number(toolStatus['tool_number'] ?? tool_numbers[i]);
+        var cx_offset   = Number(toolStatus['gcode_x_offset'] ?? 0).toFixed(3);
+        var cy_offset   = Number(toolStatus['gcode_y_offset'] ?? 0).toFixed(3);
+        var disabled    = "";
+        var tc_disabled = "disabled";
+
+        if (tool_number != active_tool) {
+          disabled    = "disabled";
+          tc_disabled = "";
+        }
+        
+        if (tool_number === 0) {
+          $("#tool-list").append(zeroListItem({tool_number: tool_number, disabled: disabled, tc_disabled: tc_disabled}));
+        } else {
+          $("#tool-list").append(nonZeroListItem({tool_number: tool_number, cx_offset: cx_offset, cy_offset: cy_offset, disabled: disabled, tc_disabled: tc_disabled}));
+        }
       });
     }).fail(function(error) {
       console.error('Error loading tool status:', error);
@@ -436,6 +458,19 @@ function getTools() {
 
     // Trigger one initial status read to show Z fields and populate values.
     updateAllProbeResults();
+      // Always add calibration button after all tools.
+      $("#tool-list").append(calibrateButton(true, tool_numbers));
+
+      // Trigger one initial status read to show Z fields and populate values.
+      updateAllProbeResults();
+      // Add calibration button after all tools
+      getProbeResults().then(() => {
+        // Calibration should stay triggerable even if probe results are empty.
+        $("#tool-list").append(calibrateButton(true, tool_numbers));
+      });
+      
+      // Trigger one initial status read to show Z fields and populate values.
+      getProbeResults();
 
     // Set up copy handlers for all tools
     tool_numbers.forEach(tool => {
@@ -483,6 +518,20 @@ function getTools() {
           console.error('Error checking axiscope availability:', error);
         });
       });
+    }).fail(function(error) {
+      console.error('Error loading tool status:', error);
+      // Keep UI usable even if detail query fails.
+      $("#tool-list").html('');
+      $.each(tool_numbers, function(i) {
+        const tool_number = Number(tool_numbers[i]);
+        if (tool_number === 0) {
+          $("#tool-list").append(zeroListItem({tool_number: tool_number, disabled: "", tc_disabled: ""}));
+        } else {
+          $("#tool-list").append(nonZeroListItem({tool_number: tool_number, cx_offset: '0.000', cy_offset: '0.000', disabled: "", tc_disabled: ""}));
+        }
+      });
+      $("#tool-list").append(calibrateButton(true, tool_numbers));
+      updateAllProbeResults();
     });
 
     updateTools(tool_numbers, active_tool);

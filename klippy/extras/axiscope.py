@@ -17,6 +17,8 @@ class Axiscope:
         self.move_speed    = config.getint('move_speed'  , 60)
         self.z_move_speed  = config.getint('z_move_speed', 10)
         self.samples       = config.getint('samples'     , 10)
+        self.samples_tolerance = self._parse_samples_tolerance(config)
+        self.samples_max_count = self._parse_samples_max_count(config)
 
         self.pin              = config.get('pin'             , None)
         self.config_file_path = config.get('config_file_path', None)
@@ -61,6 +63,29 @@ class Axiscope:
         self.gcode.register_command('AXISCOPE_FINISH_GCODE', self.cmd_AXISCOPE_FINISH_GCODE, desc="Execute the Axiscope finish G-code macro")
         self.gcode.register_command('AXISCOPE_SAVE_TOOL_OFFSET',          self.cmd_AXISCOPE_SAVE_TOOL_OFFSET,          desc=self.cmd_AXISCOPE_SAVE_TOOL_OFFSET_help)
         self.gcode.register_command('AXISCOPE_SAVE_MULTIPLE_TOOL_OFFSETS', self.cmd_AXISCOPE_SAVE_MULTIPLE_TOOL_OFFSETS, desc=self.cmd_AXISCOPE_SAVE_MULTIPLE_TOOL_OFFSETS_help)
+
+
+    def _parse_samples_tolerance(self, config):
+        tolerance_value = config.get('samples_tolerance', '0.02')
+        try:
+            tolerance = float(tolerance_value)
+        except ValueError:
+            raise config.error("Option 'samples_tolerance' in section 'axiscope' must be a number")
+
+        if tolerance < 0.0:
+            raise config.error("Option 'samples_tolerance' in section 'axiscope' must be >= 0")
+        return tolerance
+
+    def _parse_samples_max_count(self, config):
+        max_count_value = config.get('samples_max_count', str(self.samples))
+        try:
+            max_count = int(max_count_value)
+        except ValueError:
+            raise config.error("Option 'samples_max_count' in section 'axiscope' must be an integer")
+
+        if max_count < self.samples:
+            raise config.error("Option 'samples_max_count' in section 'axiscope' must be >= samples")
+        return max_count
 
     def handle_connect(self):
         if self.config_file_path is not None:
@@ -199,11 +224,38 @@ class Axiscope:
 
     cmd_PROBE_ZSWITCH_help = "Probe the Z switch to determine offset."
 
+    def _probe_zswitch(self, gcmd):
+        requested_samples = gcmd.get_int('SAMPLES', self.samples, minval=1)
+        max_samples = gcmd.get_int('SAMPLES_MAX_COUNT', self.samples_max_count, minval=requested_samples)
+        tolerance = gcmd.get_float('SAMPLES_TOLERANCE', self.samples_tolerance, minval=0.)
+
+        # Build a sanitized gcmd for run_probe() so custom Axiscope params
+        # (e.g. SAMPLES_TOLERANCE / SAMPLES_MAX_COUNT) do not break probe parsing.
+        probe_gcmd = self.gcode.create_gcode_command('PROBE_ZSWITCH', 'PROBE_ZSWITCH', {})
+
+        sample_results = []
+        for _ in range(max_samples):
+            sample_results.append(
+                self.probe_multi_axis.run_probe(
+                    "z-", probe_gcmd, speed_ratio=0.5, max_distance=10.0, samples=1
+                )[2]
+            )
+
+            spread = max(sample_results) - min(sample_results)
+            if len(sample_results) >= requested_samples and spread <= tolerance:
+                return sum(sample_results) / len(sample_results)
+
+        spread = max(sample_results) - min(sample_results)
+        raise gcmd.error(
+            "Probe sample spread %.5f exceeds tolerance %.5f after %i samples."
+            % (spread, tolerance, max_samples)
+        )
+
     def cmd_PROBE_ZSWITCH(self, gcmd):
         toolhead  = self.printer.lookup_object('toolhead')
         tool_no   = str(self.toolchanger.active_tool.tool_number)
         start_pos = toolhead.get_position()
-        z_result  = self.probe_multi_axis.run_probe("z-", gcmd, speed_ratio=0.5, max_distance=10.0, samples=self.samples)[2]
+        z_result  = self._probe_zswitch(gcmd)
         
         self.reactor = self.printer.get_reactor()
         measured_time = self.reactor.monotonic()
@@ -250,7 +302,7 @@ class Axiscope:
             self.cmd_AXISCOPE_AFTER_PICKUP_GCODE(gcmd)
             
             self.gcode.run_script_from_command('MOVE_TO_ZSWITCH')
-            self.gcode.run_script_from_command('PROBE_ZSWITCH SAMPLES=%i' % self.samples)
+            self.gcode.run_script_from_command('PROBE_ZSWITCH')
 
         self.gcode.run_script_from_command('T0')
 

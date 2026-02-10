@@ -395,10 +395,28 @@ function getTools() {
   var active_tool;
 
   $.get(url, function(data){
-    tool_names   = data['result']['status']['toolchanger']['tool_names'];
-    tool_numbers = data['result']['status']['toolchanger']['tool_numbers'];
-    active_tool  = data['result']['status']['toolchanger']['tool_number'];
+    const tcStatus = data?.result?.status?.toolchanger || {};
+    const rawToolNames = tcStatus.tool_names;
+    const rawToolNumbers = tcStatus.tool_numbers;
 
+    tool_names = Array.isArray(rawToolNames) ? rawToolNames : Object.values(rawToolNames || {});
+    tool_numbers = Array.isArray(rawToolNumbers) ? rawToolNumbers : Object.values(rawToolNumbers || {});
+    tool_numbers = tool_numbers.map(v => Number(v)).filter(v => Number.isFinite(v));
+    active_tool = Number(tcStatus.tool_number);
+
+    if (!tool_numbers.length) {
+      console.error('Toolchanger returned no tool numbers:', tcStatus);
+      $("#tool-list").html('');
+      return;
+    }
+
+    if (tool_names.length !== tool_numbers.length) {
+      // Build stable fallback names from tool numbers.
+      tool_names = tool_numbers.map(t => `tool ${t}`);
+    }
+
+    // 1) Always render immediately from tool_numbers so UI never becomes empty.
+    $("#tool-list").html('');
     // 1) Always render immediately from tool_numbers so UI never becomes empty.
     $("#tool-list").html('');
     $.each(tool_numbers, function(i) {
@@ -422,13 +440,44 @@ function getTools() {
     // 2) Best-effort detail fetch for current X/Y offsets.
     url = printerUrl(printerIp, "/printer/objects/query?")
     $.each(tool_numbers, function(i) {
-      url = url + tool_names[i] + "&";
+      const tool_number = Number(tool_numbers[i]);
+      var disabled = "";
+      var tc_disabled = "disabled";
+
+      if (tool_number != active_tool) {
+        disabled = "disabled";
+        tc_disabled = "";
+      }
+
+      if (tool_number === 0) {
+        $("#tool-list").append(zeroListItem({tool_number: tool_number, disabled: disabled, tc_disabled: tc_disabled}));
+      } else {
+        $("#tool-list").append(nonZeroListItem({tool_number: tool_number, cx_offset: '0.000', cy_offset: '0.000', disabled: disabled, tc_disabled: tc_disabled}));
+      }
+    });
+    $("#tool-list").append(calibrateButton(true, tool_numbers));
+
+    // 2) Best-effort detail fetch for current X/Y offsets.
+    url = printerUrl(printerIp, "/printer/objects/query?")
+    $.each(tool_names, function(i) {
+      if (tool_names[i]) {
+        url = url + tool_names[i] + "&";
+      }
     });
     url = url.substring(0, url.length-1);
+
+    if (url.endsWith('?')) {
+      updateAllProbeResults();
+      updateTools(tool_numbers, active_tool);
+      startProbeResultsUpdates();
+      return;
+    }
 
     $.get(url, function(data){
       $.each(tool_numbers, function(i) {
         const tool_number = Number(tool_numbers[i]);
+        const toolName = tool_names[i];
+        const toolStatus = data?.result?.status?.[toolName] || {};
         const toolStatus = data?.result?.status?.[tool_names[i]] || {};
         const cx_offset = Number(toolStatus['gcode_x_offset'] ?? 0).toFixed(3);
         const cy_offset = Number(toolStatus['gcode_y_offset'] ?? 0).toFixed(3);
@@ -455,6 +504,9 @@ function getTools() {
     }).fail(function(error) {
       console.error('Error loading tool status:', error);
     });
+
+    // Trigger one initial status read to show Z fields and populate values.
+    updateAllProbeResults();
 
     // Trigger one initial status read to show Z fields and populate values.
     updateAllProbeResults();

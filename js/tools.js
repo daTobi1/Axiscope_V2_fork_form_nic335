@@ -250,6 +250,10 @@ function getProbeResults() {
       // Show Z rows whenever Axiscope object is available.
       $('.z-fields').removeClass('d-none');
       return axiscopeStatus.probe_results || {};
+    const hasProbeResults = data.result?.status?.axiscope?.probe_results != null;
+
+    if (hasProbeResults) {
+      return data.result.status.axiscope.probe_results;
     }
     return {};
   }).catch(function(error) {

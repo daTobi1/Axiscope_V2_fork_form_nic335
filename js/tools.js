@@ -250,6 +250,10 @@ function getProbeResults() {
       // Show Z rows whenever Axiscope object is available.
       $('.z-fields').removeClass('d-none');
       return axiscopeStatus.probe_results || {};
+    const hasProbeResults = data.result?.status?.axiscope?.probe_results != null;
+
+    if (hasProbeResults) {
+      return data.result.status.axiscope.probe_results;
     }
     return {};
   }).catch(function(error) {
@@ -259,14 +263,7 @@ function getProbeResults() {
 }
 
 function getProbeResultForTool(probeResults, toolNumber) {
-  const asString = String(toolNumber);
-  const asNumber = Number(toolNumber);
-  const asToolName = `T${asString}`;
-  return probeResults?.[toolNumber]
-    ?? probeResults?.[asString]
-    ?? probeResults?.[asNumber]
-    ?? probeResults?.[asToolName]
-    ?? null;
+  return probeResults?.[toolNumber] ?? probeResults?.[String(toolNumber)] ?? probeResults?.[Number(toolNumber)] ?? null;
 }
 
 function updateProbeResults(tool_number, probeResults) {

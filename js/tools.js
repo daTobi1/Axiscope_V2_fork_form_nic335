@@ -399,17 +399,41 @@ function getTools() {
     tool_numbers = data['result']['status']['toolchanger']['tool_numbers'];
     active_tool  = data['result']['status']['toolchanger']['tool_number'];
 
-    url = printerUrl(printerIp, "/printer/objects/query?")
+    // 1) Always render immediately from tool_numbers so UI never becomes empty.
+    $("#tool-list").html('');
+    $.each(tool_numbers, function(i) {
+      const tool_number = Number(tool_numbers[i]);
+      var disabled = "";
+      var tc_disabled = "disabled";
 
+      if (tool_number != active_tool) {
+        disabled = "disabled";
+        tc_disabled = "";
+      }
+
+      if (tool_number === 0) {
+        $("#tool-list").append(zeroListItem({tool_number: tool_number, disabled: disabled, tc_disabled: tc_disabled}));
+      } else {
+        $("#tool-list").append(nonZeroListItem({tool_number: tool_number, cx_offset: '0.000', cy_offset: '0.000', disabled: disabled, tc_disabled: tc_disabled}));
+      }
+    });
+    $("#tool-list").append(calibrateButton(true, tool_numbers));
+
+    // 2) Best-effort detail fetch for current X/Y offsets.
+    url = printerUrl(printerIp, "/printer/objects/query?")
     $.each(tool_numbers, function(i) {
       url = url + tool_names[i] + "&";
     });
-
     url = url.substring(0, url.length-1);
 
     $.get(url, function(data){
-      $("#tool-list").html('');
       $.each(tool_numbers, function(i) {
+        const tool_number = Number(tool_numbers[i]);
+        const toolStatus = data?.result?.status?.[tool_names[i]] || {};
+        const cx_offset = Number(toolStatus['gcode_x_offset'] ?? 0).toFixed(3);
+        const cy_offset = Number(toolStatus['gcode_y_offset'] ?? 0).toFixed(3);
+        $(`#T${tool_number}-x-offset`).find('>:first-child').text(cx_offset);
+        $(`#T${tool_number}-y-offset`).find('>:first-child').text(cy_offset);
         const toolStatus = data?.result?.status?.[tool_names[i]] || {};
         var tool_number = Number(toolStatus['tool_number'] ?? tool_numbers[i]);
         var cx_offset   = Number(toolStatus['gcode_x_offset'] ?? 0).toFixed(3);
@@ -428,7 +452,12 @@ function getTools() {
           $("#tool-list").append(nonZeroListItem({tool_number: tool_number, cx_offset: cx_offset, cy_offset: cy_offset, disabled: disabled, tc_disabled: tc_disabled}));
         }
       });
+    }).fail(function(error) {
+      console.error('Error loading tool status:', error);
+    });
 
+    // Trigger one initial status read to show Z fields and populate values.
+    updateAllProbeResults();
       // Always add calibration button after all tools.
       $("#tool-list").append(calibrateButton(true, tool_numbers));
 
@@ -443,51 +472,50 @@ function getTools() {
       // Trigger one initial status read to show Z fields and populate values.
       getProbeResults();
 
-      // Set up copy handlers for all tools
-      tool_numbers.forEach(tool => {
-        $(`#T${tool}-copy-all`).off('click').on('click', function() {
-          const $this = $(this);
-          const originalText = $this.text();
+    // Set up copy handlers for all tools
+    tool_numbers.forEach(tool => {
+      $(`#T${tool}-copy-all`).off('click').on('click', function() {
+        const $this = $(this);
+        const originalText = $this.text();
+        
+        // Get X/Y offsets
+        const xOffset = $(`#T${tool}-x-new`).find('>:first-child').text();
+        const yOffset = $(`#T${tool}-y-new`).find('>:first-child').text();
+        let gcodeCommands = [
+          `gcode_x_offset: ${xOffset}`,
+          `gcode_y_offset: ${yOffset}`
+        ];
+        
+        // Check if axiscope is available before including Z offset
+        $.get(printerUrl(printerIp, "/printer/objects/query?axiscope")).then(data => {
+          const hasProbeResults = data.result?.status?.axiscope?.probe_results != null;
+          if (hasProbeResults) {
+            const zValue = $(`#T${tool}-z-new`).find('>:first-child').text();
+            gcodeCommands.push(`gcode_z_offset: ${zValue}`);
+          }
           
-          // Get X/Y offsets
-          const xOffset = $(`#T${tool}-x-new`).find('>:first-child').text();
-          const yOffset = $(`#T${tool}-y-new`).find('>:first-child').text();
-          let gcodeCommands = [
-            `gcode_x_offset: ${xOffset}`,
-            `gcode_y_offset: ${yOffset}`
-          ];
+          // Create temporary textarea
+          const textarea = document.createElement('textarea');
+          textarea.value = gcodeCommands.join('\n');
+          textarea.style.position = 'fixed';
+          textarea.style.opacity = '0';
+          document.body.appendChild(textarea);
           
-          // Check if axiscope is available before including Z offset
-          $.get(printerUrl(printerIp, "/printer/objects/query?axiscope")).then(data => {
-            const hasProbeResults = data.result?.status?.axiscope?.probe_results != null;
-            if (hasProbeResults) {
-              const zValue = $(`#T${tool}-z-new`).find('>:first-child').text();
-              gcodeCommands.push(`gcode_z_offset: ${zValue}`);
-            }
-            
-            // Create temporary textarea
-            const textarea = document.createElement('textarea');
-            textarea.value = gcodeCommands.join('\n');
-            textarea.style.position = 'fixed';
-            textarea.style.opacity = '0';
-            document.body.appendChild(textarea);
-            
-            try {
-              textarea.select();
-              document.execCommand('copy');
-              const $icon = $this.find('i');
-              $icon.removeClass('bi-clipboard-data').addClass('bi-clipboard-check-fill text-success');
-              setTimeout(() => {
-                $icon.removeClass('bi-clipboard-check-fill text-success').addClass('bi-clipboard-data');
-              }, 1000);
-            } catch (err) {
-              console.error('Failed to copy:', err);
-            } finally {
-              document.body.removeChild(textarea);
-            }
-          }).catch(error => {
-            console.error('Error checking axiscope availability:', error);
-          });
+          try {
+            textarea.select();
+            document.execCommand('copy');
+            const $icon = $this.find('i');
+            $icon.removeClass('bi-clipboard-data').addClass('bi-clipboard-check-fill text-success');
+            setTimeout(() => {
+              $icon.removeClass('bi-clipboard-check-fill text-success').addClass('bi-clipboard-data');
+            }, 1000);
+          } catch (err) {
+            console.error('Failed to copy:', err);
+          } finally {
+            document.body.removeChild(textarea);
+          }
+        }).catch(error => {
+          console.error('Error checking axiscope availability:', error);
         });
       });
     }).fail(function(error) {

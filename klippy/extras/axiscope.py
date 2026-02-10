@@ -258,16 +258,49 @@ class Axiscope:
 
     cmd_CALIBRATE_ALL_Z_OFFSETS_help = "Probe the Z switch for each tool to determine offset."
 
+    def _get_calibration_tools(self, gcmd):
+        raw_tools = gcmd.get('TOOLS', None)
+        available_tools = [int(tool_no) for tool_no in self.toolchanger.tool_numbers]
+
+        if raw_tools is None or raw_tools.strip() == '':
+            return available_tools
+
+        selected_tools = []
+        for value in raw_tools.split(','):
+            value = value.strip()
+            if value == '':
+                continue
+
+            try:
+                tool_no = int(value)
+            except ValueError:
+                raise gcmd.error("Invalid tool '%s' in TOOLS. Use a comma-separated list like TOOLS=0,1,2" % value)
+
+            if tool_no not in available_tools:
+                raise gcmd.error("Tool T%i is not available. Available tools: %s" % (
+                    tool_no, ','.join(['T%i' % tool for tool in available_tools])
+                ))
+
+            if tool_no not in selected_tools:
+                selected_tools.append(tool_no)
+
+        if not selected_tools:
+            raise gcmd.error("No valid tools were provided in TOOLS.")
+
+        return selected_tools
+
     def cmd_CALIBRATE_ALL_Z_OFFSETS(self, gcmd):
         
         if not self.is_homed():
             gcmd.respond_info('Must home first.')
             return
             
+        selected_tools = self._get_calibration_tools(gcmd)
+
         # Run start_gcode at the beginning of calibration
         self.cmd_AXISCOPE_START_GCODE(gcmd)
 
-        for tool_no in self.toolchanger.tool_numbers:
+        for tool_no in selected_tools:
             # Run before_pickup_gcode before tool change
             self.cmd_AXISCOPE_BEFORE_PICKUP_GCODE(gcmd)
             self.gcode.run_script_from_command('T%i' % tool_no)
@@ -280,7 +313,8 @@ class Axiscope:
                 % (self.samples, self.samples_tolerance, self.samples_max_count)
             )
 
-        self.gcode.run_script_from_command('T0')
+        if 0 in self.toolchanger.tool_numbers:
+            self.gcode.run_script_from_command('T0')
 
         toolhead = self.printer.lookup_object('toolhead')
         toolhead.wait_moves()

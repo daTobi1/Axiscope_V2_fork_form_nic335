@@ -250,6 +250,10 @@ function getProbeResults() {
       // Show Z rows whenever Axiscope object is available.
       $('.z-fields').removeClass('d-none');
       return axiscopeStatus.probe_results || {};
+    const hasProbeResults = data.result?.status?.axiscope?.probe_results != null;
+
+    if (hasProbeResults) {
+      return data.result.status.axiscope.probe_results;
     }
     return {};
   }).catch(function(error) {
@@ -267,6 +271,7 @@ function getProbeResultForTool(probeResults, toolNumber) {
     ?? probeResults?.[asNumber]
     ?? probeResults?.[asToolName]
     ?? null;
+  return probeResults?.[toolNumber] ?? probeResults?.[String(toolNumber)] ?? probeResults?.[Number(toolNumber)] ?? null;
 }
 
 function updateProbeResults(tool_number, probeResults) {
@@ -429,6 +434,14 @@ function getTools() {
 
       // Trigger one initial status read to show Z fields and populate values.
       updateAllProbeResults();
+      // Add calibration button after all tools
+      getProbeResults().then(() => {
+        // Calibration should stay triggerable even if probe results are empty.
+        $("#tool-list").append(calibrateButton(true, tool_numbers));
+      });
+      
+      // Trigger one initial status read to show Z fields and populate values.
+      getProbeResults();
 
       // Set up copy handlers for all tools
       tool_numbers.forEach(tool => {

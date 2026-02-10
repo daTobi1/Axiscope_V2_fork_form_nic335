@@ -245,6 +245,11 @@ function toolChangeURL(tool) {
 function getProbeResults() {
   var url = printerUrl(printerIp, "/printer/objects/query?axiscope");
   return $.get(url).then(function(data) {
+    const axiscopeStatus = data.result?.status?.axiscope;
+    if (axiscopeStatus) {
+      // Show Z rows whenever Axiscope object is available.
+      $('.z-fields').removeClass('d-none');
+      return axiscopeStatus.probe_results || {};
     const hasProbeResults = data.result?.status?.axiscope?.probe_results != null;
 
     if (hasProbeResults) {
@@ -257,15 +262,19 @@ function getProbeResults() {
   });
 }
 
+function getProbeResultForTool(probeResults, toolNumber) {
+  return probeResults?.[toolNumber] ?? probeResults?.[String(toolNumber)] ?? probeResults?.[Number(toolNumber)] ?? null;
+}
+
 function updateProbeResults(tool_number, probeResults) {
-  if (probeResults[tool_number]) {
-  const result = probeResults[tool_number];
+  const result = getProbeResultForTool(probeResults, tool_number);
+  if (result && typeof result.z_trigger !== 'undefined') {
     // Update Z-Trigger for all tools
-    $(`#T${tool_number}-z-trigger`).find('>:first-child').text(result.z_trigger.toFixed(3));
+    $(`#T${tool_number}-z-trigger`).find('>:first-child').text(Number(result.z_trigger).toFixed(3));
     
     // Update Z-Offset only for non-zero tools
-    if (tool_number !== '0' && tool_number !== 0) {
-      $(`#T${tool_number}-z-new`).find('>:first-child').text(result.z_offset.toFixed(3));
+    if (tool_number !== '0' && tool_number !== 0 && typeof result.z_offset !== 'undefined') {
+      $(`#T${tool_number}-z-new`).find('>:first-child').text(Number(result.z_offset).toFixed(3));
     }
   }
 }
@@ -417,15 +426,8 @@ function getTools() {
         $("#tool-list").append(calibrateButton(true, tool_numbers));
       });
       
-      // Check if axiscope is available
-      $.get(printerUrl(printerIp, "/printer/objects/query?axiscope")).then(function(data) {
-        const hasProbeResults = data.result?.status?.axiscope?.probe_results != null;
-        if (hasProbeResults) {
-          $('.z-fields').removeClass('d-none');
-        }
-      }).catch(function(error) {
-        console.error('Error checking axiscope availability:', error);
-      });
+      // Trigger one initial status read to show Z fields and populate values.
+      getProbeResults();
 
       // Set up copy handlers for all tools
       tool_numbers.forEach(tool => {

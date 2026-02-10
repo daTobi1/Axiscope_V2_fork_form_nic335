@@ -88,6 +88,13 @@ class Axiscope:
     def has_switch_pos(self):
         return all(v is not None for v in (self.x_pos, self.y_pos, self.z_pos))
 
+    def get_status(self, eventtime):
+        return {
+            'probe_results': self.probe_results,
+            'has_cfg_data': self.has_cfg_data,
+            'has_switch_pos': self.has_switch_pos(),
+        }
+
     def cmd_MOVE_TO_ZSWITCH(self, gcmd):
         if not self.is_homed():
             gcmd.respond_error("Must home first")
@@ -184,6 +191,19 @@ class Axiscope:
                 z = self._run_probe_with_recovery(gcmd)
                 batch_samples.append(z)
                 total_taken += 1
+
+                # IMPORTANT: always release the switch between samples
+                toolhead.wait_moves()
+                cur = toolhead.get_position()
+                target_z = max(cur[2] + self.recover_lift_mm, self.safe_start_z)
+                toolhead.manual_move([None, None, target_z], self.z_move_speed)
+                toolhead.wait_moves()
+
+            spread = max(batch_samples) - min(batch_samples)
+            last_spread = spread
+            if spread <= tolerance:
+                return median(batch_samples)
+
 
                 # IMPORTANT: always release the switch between samples
                 toolhead.wait_moves()

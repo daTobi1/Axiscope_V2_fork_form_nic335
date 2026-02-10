@@ -1,5 +1,7 @@
 import os
 import ast
+from statistics import median
+
 from . import tools_calibrate
 from . import toolchanger
 
@@ -113,10 +115,17 @@ class Axiscope:
         toolhead = self.printer.lookup_object('toolhead')
         last_err = None
 
+        # Force a single low-level probe sample per call.
+        # Axiscope handles batching/tolerance itself in _probe_zswitch().
+        probe_gcmd = self.gcode.create_gcode_command(
+            "PROBE_ZSWITCH", "PROBE_ZSWITCH",
+            {'SAMPLES': 1, 'SAMPLES_TOLERANCE': 0.0, 'SAMPLES_MAX_COUNT': 1}
+        )
+
         for _ in range(self.recover_max_attempts):
             try:
                 return self.probe_multi_axis.run_probe(
-                    "z-", gcmd, speed_ratio=0.5, max_distance=10.0, samples=1
+                    "z-", probe_gcmd, speed_ratio=0.5, max_distance=10.0, samples=1
                 )[2]
             except Exception as e:
                 last_err = e
@@ -134,9 +143,7 @@ class Axiscope:
 
         raise gcmd.error(f"Axiscope: Probe still triggered after recovery. {last_err}")
 
-    # ===========================
-    # FIX B: RELEASE AFTER EACH SAMPLE
-    # ===========================
+    # Release the switch between samples and evaluate in batches.
     def _probe_zswitch(self, gcmd):
         requested = gcmd.get_int('SAMPLES', self.samples, minval=1)
         max_count = gcmd.get_int('SAMPLES_MAX_COUNT', self.samples_max_count, minval=requested)
@@ -145,6 +152,28 @@ class Axiscope:
         toolhead = self.printer.lookup_object('toolhead')
         total_taken = 0
         last_spread = None
+
+        # Evaluate tolerance per batch of `requested` probes.
+        # If a batch fails tolerance, discard it and run a fresh batch.
+        while total_taken + requested <= max_count:
+            batch_samples = []
+
+            for _ in range(requested):
+                z = self._run_probe_with_recovery(gcmd)
+                batch_samples.append(z)
+                total_taken += 1
+
+                # IMPORTANT: always release the switch between samples
+                toolhead.wait_moves()
+                cur = toolhead.get_position()
+                target_z = max(cur[2] + self.recover_lift_mm, self.safe_start_z)
+                toolhead.manual_move([None, None, target_z], self.z_move_speed)
+                toolhead.wait_moves()
+
+            spread = max(batch_samples) - min(batch_samples)
+            last_spread = spread
+            if spread <= tolerance:
+                return median(batch_samples)
 
         # Evaluate tolerance per batch of `requested` probes.
         # If a batch fails tolerance, discard it and run a fresh batch.
@@ -185,8 +214,11 @@ class Axiscope:
         if tool_no == "0":
             self.probe_results[tool_no] = {'z_trigger': z, 'z_offset': 0, 'last_run': t}
         elif "0" in self.probe_results:
-            z_offset = z - self.probe_results["0"]['z_trigger']
+            # Offset formula per calibration flow: reference_z - tool_z
+            z_offset = self.probe_results["0"]['z_trigger'] - z
             self.probe_results[tool_no] = {'z_trigger': z, 'z_offset': z_offset, 'last_run': t}
+        else:
+            self.probe_results[tool_no] = {'z_trigger': z, 'z_offset': 0, 'last_run': t}
 
         toolhead.move(start_pos, self.z_move_speed)
         toolhead.set_position(start_pos)
@@ -199,7 +231,34 @@ class Axiscope:
 
         self.cmd_AXISCOPE_START_GCODE(gcmd)
 
-        for tool in self.toolchanger.tool_numbers:
+        selected_tools = gcmd.get('TOOLS', None)
+        if selected_tools:
+            requested = []
+            for token in selected_tools.split(','):
+                token = token.strip()
+                if token.isdigit():
+                    requested.append(int(token))
+        else:
+            requested = list(self.toolchanger.tool_numbers)
+
+        # Keep only existing tools and de-duplicate while preserving order
+        available_tools = set(self.toolchanger.tool_numbers)
+        ordered_tools = []
+        seen = set()
+        for tool in requested:
+            if tool in available_tools and tool not in seen:
+                seen.add(tool)
+                ordered_tools.append(tool)
+
+        if not ordered_tools:
+            gcmd.respond_error("No valid tools selected")
+            return
+
+        # Always probe the reference tool first so all offsets are from fresh data.
+        if 0 in available_tools:
+            ordered_tools = [0] + [tool for tool in ordered_tools if tool != 0]
+
+        for tool in ordered_tools:
             self.cmd_AXISCOPE_BEFORE_PICKUP_GCODE(gcmd)
             self.gcode.run_script_from_command(f"T{tool}")
             self.cmd_AXISCOPE_AFTER_PICKUP_GCODE(gcmd)

@@ -17,6 +17,8 @@ class Axiscope:
         self.move_speed    = config.getint('move_speed'  , 60)
         self.z_move_speed  = config.getint('z_move_speed', 10)
         self.samples       = config.getint('samples'     , 10)
+        self.samples_tolerance = config.getfloat('samples_tolerance', 0.02, minval=0.)
+        self.samples_max_count = config.getint('samples_max_count', self.samples, minval=self.samples)
 
         self.pin              = config.get('pin'             , None)
         self.config_file_path = config.get('config_file_path', None)
@@ -199,11 +201,34 @@ class Axiscope:
 
     cmd_PROBE_ZSWITCH_help = "Probe the Z switch to determine offset."
 
+    def _probe_zswitch(self, gcmd):
+        requested_samples = gcmd.get_int('SAMPLES', self.samples, minval=1)
+        max_samples = gcmd.get_int('SAMPLES_MAX_COUNT', self.samples_max_count, minval=requested_samples)
+        tolerance = gcmd.get_float('SAMPLES_TOLERANCE', self.samples_tolerance, minval=0.)
+
+        sample_results = []
+        for _ in range(max_samples):
+            sample_results.append(
+                self.probe_multi_axis.run_probe(
+                    "z-", gcmd, speed_ratio=0.5, max_distance=10.0, samples=1
+                )[2]
+            )
+
+            spread = max(sample_results) - min(sample_results)
+            if len(sample_results) >= requested_samples and spread <= tolerance:
+                return sum(sample_results) / len(sample_results)
+
+        spread = max(sample_results) - min(sample_results)
+        raise gcmd.error(
+            "Probe sample spread %.5f exceeds tolerance %.5f after %i samples."
+            % (spread, tolerance, max_samples)
+        )
+
     def cmd_PROBE_ZSWITCH(self, gcmd):
         toolhead  = self.printer.lookup_object('toolhead')
         tool_no   = str(self.toolchanger.active_tool.tool_number)
         start_pos = toolhead.get_position()
-        z_result  = self.probe_multi_axis.run_probe("z-", gcmd, speed_ratio=0.5, max_distance=10.0, samples=self.samples)[2]
+        z_result  = self._probe_zswitch(gcmd)
         
         self.reactor = self.printer.get_reactor()
         measured_time = self.reactor.monotonic()
@@ -250,7 +275,10 @@ class Axiscope:
             self.cmd_AXISCOPE_AFTER_PICKUP_GCODE(gcmd)
             
             self.gcode.run_script_from_command('MOVE_TO_ZSWITCH')
-            self.gcode.run_script_from_command('PROBE_ZSWITCH SAMPLES=%i' % self.samples)
+            self.gcode.run_script_from_command(
+                'PROBE_ZSWITCH SAMPLES=%i SAMPLES_TOLERANCE=%.5f SAMPLES_MAX_COUNT=%i'
+                % (self.samples, self.samples_tolerance, self.samples_max_count)
+            )
 
         self.gcode.run_script_from_command('T0')
 

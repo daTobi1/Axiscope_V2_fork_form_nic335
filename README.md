@@ -195,6 +195,19 @@ If you encounter this error when starting Klipper:
 1. Remove or comment out the inclusion of `calibrate_offsets.cfg` in your printer.cfg
 2. OR ensure you're only using one of these two calibration methods, not both
 
+### Error: `Option 'samples_max_count' is not valid in section 'axiscope'`
+
+If Klipper reports this error, your running Axiscope module is older than your `printer.cfg` options.
+
+1. Update the `axiscope.py` plugin on your printer to the latest version from this repository.
+2. Restart Klipper host software with:
+
+```gcode
+RESTART
+```
+
+After restart, `samples_tolerance` and `samples_max_count` are recognized in `[axiscope]`.
+
 Only Axiscope should be using the `probe_multi_axis` module when configured correctly.
 
 ## Credits

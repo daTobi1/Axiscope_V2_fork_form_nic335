@@ -13,42 +13,33 @@ class Axiscope:
         self.y_pos         = config.getfloat('zswitch_y_pos', None)
         self.z_pos         = config.getfloat('zswitch_z_pos', None)
 
-        # Standard Lift (wie bisher)
-        self.lift_z        = config.getfloat('lift_z', 1)
-
-        # NEU: sichere Start-Z-Höhe (damit der Switch garantiert nicht "noch gedrückt" ist)
-        # Start-Z wird: max(z_pos + lift_z, safe_start_z)
+        self.lift_z        = config.getfloat('lift_z', 1.0)
         self.safe_start_z  = config.getfloat('safe_start_z', 6.0, minval=0.)
 
         self.move_speed    = config.getint('move_speed', 60)
         self.z_move_speed  = config.getint('z_move_speed', 10)
 
-        self.samples       = config.getint('samples', 10)
-        self.samples_tolerance = config.getfloat('samples_tolerance', 0.02, minval=0.)
-        self.samples_max_count = config.getint('samples_max_count', self.samples, minval=self.samples)
+        self.samples               = config.getint('samples', 10)
+        self.samples_tolerance     = config.getfloat('samples_tolerance', 0.02, minval=0.)
+        self.samples_max_count     = config.getint('samples_max_count', self.samples, minval=self.samples)
 
         self.pin              = config.get('pin', None)
         self.config_file_path = config.get('config_file_path', None)
 
-        # NEU: Recovery-Parameter gegen "Probe triggered prior to movement"
-        # Wenn Probe schon getriggert ist -> Lift + Pause + Retry
-        self.recover_lift_mm       = config.getfloat('recover_lift_mm', 2.0, minval=0.)
-        self.recover_pause_ms      = config.getint('recover_pause_ms', 150, minval=0)
-        self.recover_max_attempts  = config.getint('recover_max_attempts', 4, minval=1)
+        # Recovery gegen "Probe triggered prior to movement"
+        self.recover_lift_mm      = config.getfloat('recover_lift_mm', 2.0, minval=0.)
+        self.recover_pause_ms     = config.getint('recover_pause_ms', 150, minval=0)
+        self.recover_max_attempts = config.getint('recover_max_attempts', 4, minval=1)
 
-        # Load gcode_macro module for template support
         self.gcode_macro = self.printer.load_object(config, 'gcode_macro')
-
-        # Custom gcode macros
         self.start_gcode = self.gcode_macro.load_template(config, 'start_gcode', '')
         self.before_pickup_gcode = self.gcode_macro.load_template(config, 'before_pickup_gcode', '')
-        self.after_pickup_gcode = self.gcode_macro.load_template(config, 'after_pickup_gcode', '')
-        self.finish_gcode = self.gcode_macro.load_template(config, 'finish_gcode', '')
+        self.after_pickup_gcode  = self.gcode_macro.load_template(config, 'after_pickup_gcode', '')
+        self.finish_gcode        = self.gcode_macro.load_template(config, 'finish_gcode', '')
 
-        self.has_cfg_data     = False
+        self.has_cfg_data = False
         self.probe_results = {}
 
-        # setup endstop in query_endstops if pin is set
         if self.pin is not None:
             self.probe_multi_axis = tools_calibrate.PrinterProbeMultiAxis(
                 config,
@@ -57,401 +48,178 @@ class Axiscope:
                 tools_calibrate.ProbeEndstopWrapper(config, 'z')
             )
             query_endstops = self.printer.load_object(config, 'query_endstops')
-            query_endstops.register_endstop(self.probe_multi_axis.mcu_probe[-1].mcu_endstop, "Axiscope")
+            query_endstops.register_endstop(
+                self.probe_multi_axis.mcu_probe[-1].mcu_endstop,
+                "Axiscope"
+            )
         else:
             self.probe_multi_axis = None
 
         self.toolchanger = self.printer.load_object(config, 'toolchanger')
-
         self.printer.register_event_handler("klippy:connect", self.handle_connect)
 
-        # register gcode commands
-        self.gcode.register_command('MOVE_TO_ZSWITCH', self.cmd_MOVE_TO_ZSWITCH, desc=self.cmd_MOVE_TO_ZSWITCH_help)
-        self.gcode.register_command('PROBE_ZSWITCH',   self.cmd_PROBE_ZSWITCH, desc=self.cmd_PROBE_ZSWITCH_help)
-        self.gcode.register_command('CALIBRATE_ALL_Z_OFFSETS', self.cmd_CALIBRATE_ALL_Z_OFFSETS, desc=self.cmd_CALIBRATE_ALL_Z_OFFSETS_help)
+        self.gcode.register_command('MOVE_TO_ZSWITCH', self.cmd_MOVE_TO_ZSWITCH)
+        self.gcode.register_command('PROBE_ZSWITCH', self.cmd_PROBE_ZSWITCH)
+        self.gcode.register_command('CALIBRATE_ALL_Z_OFFSETS', self.cmd_CALIBRATE_ALL_Z_OFFSETS)
 
-        self.gcode.register_command('AXISCOPE_START_GCODE', self.cmd_AXISCOPE_START_GCODE, desc="Execute the Axiscope start G-code macro")
-        self.gcode.register_command('AXISCOPE_BEFORE_PICKUP_GCODE', self.cmd_AXISCOPE_BEFORE_PICKUP_GCODE, desc="Execute the Axiscope before pickup G-code macro")
-        self.gcode.register_command('AXISCOPE_AFTER_PICKUP_GCODE', self.cmd_AXISCOPE_AFTER_PICKUP_GCODE, desc="Execute the Axiscope after pickup G-code macro")
-        self.gcode.register_command('AXISCOPE_FINISH_GCODE', self.cmd_AXISCOPE_FINISH_GCODE, desc="Execute the Axiscope finish G-code macro")
-        self.gcode.register_command('AXISCOPE_SAVE_TOOL_OFFSET', self.cmd_AXISCOPE_SAVE_TOOL_OFFSET, desc=self.cmd_AXISCOPE_SAVE_TOOL_OFFSET_help)
-        self.gcode.register_command('AXISCOPE_SAVE_MULTIPLE_TOOL_OFFSETS', self.cmd_AXISCOPE_SAVE_MULTIPLE_TOOL_OFFSETS, desc=self.cmd_AXISCOPE_SAVE_MULTIPLE_TOOL_OFFSETS_help)
+        self.gcode.register_command('AXISCOPE_START_GCODE', self.cmd_AXISCOPE_START_GCODE)
+        self.gcode.register_command('AXISCOPE_BEFORE_PICKUP_GCODE', self.cmd_AXISCOPE_BEFORE_PICKUP_GCODE)
+        self.gcode.register_command('AXISCOPE_AFTER_PICKUP_GCODE', self.cmd_AXISCOPE_AFTER_PICKUP_GCODE)
+        self.gcode.register_command('AXISCOPE_FINISH_GCODE', self.cmd_AXISCOPE_FINISH_GCODE)
 
     def handle_connect(self):
-        if self.config_file_path is not None:
-            expanded_path = os.path.expanduser(self.config_file_path)
-            self.config_file_path = expanded_path
-
+        if self.config_file_path:
+            self.config_file_path = os.path.expanduser(self.config_file_path)
             if os.path.exists(self.config_file_path):
                 self.has_cfg_data = True
-                self.gcode.respond_info("Axiscope config file found (%s)." % self.config_file_path)
-                self.gcode.respond_info("--Axiscope Loaded--")
+                self.gcode.respond_info(f"Axiscope config file found ({self.config_file_path})")
             else:
-                self.gcode.respond_info("Could not find Axiscope config file (%s)" % self.config_file_path)
-                self.gcode.respond_info("Note: You can use ~ for home directory, e.g., ~/printer_data/config/axiscope.offsets")
-
-        else:
-            self.gcode.respond_info("Axiscope is missing config file location (config_file_path). You will need to update your tool offsets manually.")
-            self.gcode.respond_info("You can set config_file_path: ~/printer_data/config/axiscope.offsets in your [axiscope] section.")
-
-    def get_status(self, eventtime):
-        return {
-            'probe_results':   self.probe_results,
-            'can_save_config': self.has_cfg_data is not False
-        }
-
-    def run_gcode(self, name, template, extra_context):
-        """Run gcode with template expansion and context"""
-        curtime = self.printer.get_reactor().monotonic()
-        context = {
-            **template.create_template_context(),
-            'tool': self.toolchanger.active_tool.get_status(curtime) if self.toolchanger.active_tool else {},
-            'toolchanger': self.toolchanger.get_status(curtime),
-            'axiscope': self.get_status(curtime),
-            **extra_context,
-        }
-        template.run_gcode_from_command(context)
+                self.gcode.respond_info(f"Axiscope config file not found ({self.config_file_path})")
 
     def is_homed(self):
-        toolhead   = self.printer.lookup_object('toolhead')
-        ctime      = self.printer.get_reactor().monotonic()
-        homed_axes = toolhead.get_kinematics().get_status(ctime)['homed_axes']
-        return all(x in homed_axes for x in 'xyz')
+        toolhead = self.printer.lookup_object('toolhead')
+        homed = toolhead.get_kinematics().get_status(
+            self.printer.get_reactor().monotonic()
+        )['homed_axes']
+        return all(a in homed for a in 'xyz')
 
     def has_switch_pos(self):
-        return all(x is not None for x in [self.x_pos, self.y_pos, self.z_pos])
-
-    def update_tool_offsets(self, cfg_data, tool_name, offsets):
-        axis          = "xyz" if len(offsets) == 3 else "xy"
-        section_name  = "[%s]" % tool_name
-        section_start = None
-        section_end   = None
-        new_section   = None
-
-        for i, line in enumerate(cfg_data):
-            stripped_line = line.lstrip()
-            if stripped_line.startswith(section_name):
-                section_start = i+1
-            elif section_start is not None:
-                if stripped_line.startswith('['):
-                    section_end = i-1
-                    break
-
-        for i, a in enumerate(axis):
-            offset_name   = "gcode_%s_offset" % a
-            offset_value  = offsets[i]
-            offset_string = "%s: %.3f\n" % (offset_name, offset_value)
-
-            if section_start is not None:
-                if section_end is not None:
-                    section_lines = cfg_data[section_start:section_end+1]
-                else:
-                    section_lines = cfg_data[section_start:]
-
-                for line in section_lines:
-                    stripped_line = line.lstrip()
-                    if stripped_line.startswith(offset_name):
-                        cfg_index = cfg_data.index(line)
-                        cfg_data[cfg_index] = offset_string
-            else:
-                if new_section is not None:
-                    new_section.append(offset_string)
-                else:
-                    new_section = ["\n", section_name+"\n", offset_string]
-
-        if new_section is not None:
-            new_section.append("\n")
-            no_touch_index = None
-
-            if self.config_file_path.endswith('printer.cfg'):
-                for line in cfg_data:
-                    if line.lstrip().startswith('#*#'):
-                        no_touch_index = cfg_data.index(line)
-                        break
-
-            if no_touch_index is not None:
-                cfg_data = cfg_data[:no_touch_index] + ["\n"] + new_section + cfg_data[no_touch_index:]
-            else:
-                cfg_data = cfg_data + ["\n"] + new_section
-
-        return cfg_data
-
-    cmd_MOVE_TO_ZSWITCH_help = "Move the toolhead over the Z switch"
+        return all(v is not None for v in (self.x_pos, self.y_pos, self.z_pos))
 
     def cmd_MOVE_TO_ZSWITCH(self, gcmd):
         if not self.is_homed():
-            gcmd.respond_info('Must home first.')
+            gcmd.respond_error("Must home first")
             return
-
         if not self.has_switch_pos():
-            gcmd.respond_error('Z switch positions are not valid.')
+            gcmd.respond_error("Z switch positions invalid")
             return
-
-        gcmd.respond_info('Moving to Z Switch')
 
         toolhead = self.printer.lookup_object('toolhead')
         toolhead.wait_moves()
+        cur = toolhead.get_position()
 
-        # Get current position
-        current_pos = toolhead.get_position()
-
-        # Move horizontally to X/Y while keeping current Z
         self.gcode_move.cmd_G1(
             self.gcode.create_gcode_command(
                 "G0", "G0",
-                {'X': self.x_pos, 'Y': self.y_pos, 'Z': current_pos[2], 'F': self.move_speed * 60}
+                {'X': self.x_pos, 'Y': self.y_pos, 'Z': cur[2], 'F': self.move_speed * 60}
             )
         )
 
-        # Then move vertically to a SAFE Z height (prevents "already triggered")
         target_z = max(self.z_pos + self.lift_z, self.safe_start_z)
         toolhead.manual_move([None, None, target_z], self.z_move_speed)
         toolhead.wait_moves()
 
-    cmd_PROBE_ZSWITCH_help = "Probe the Z switch to determine offset."
-
     def _run_probe_with_recovery(self, gcmd):
-        """
-        Run a single Z probe sample with recovery if the probe is already triggered.
-        This robustly fixes: 'Probe triggered prior to movement'
-        """
-        if self.probe_multi_axis is None:
-            raise gcmd.error("Axiscope probe pin is not configured. Set 'pin:' in [axiscope].")
-
         toolhead = self.printer.lookup_object('toolhead')
         last_err = None
 
-        for attempt in range(self.recover_max_attempts):
+        for _ in range(self.recover_max_attempts):
             try:
-                # One sample, we only need the returned Z
                 return self.probe_multi_axis.run_probe(
                     "z-", gcmd, speed_ratio=0.5, max_distance=10.0, samples=1
                 )[2]
             except Exception as e:
                 last_err = e
-                msg = str(e).lower()
-                if "triggered prior to movement" not in msg:
-                    # Not our known condition -> raise immediately
+                if "triggered prior to movement" not in str(e).lower():
                     raise
-
-                # Recovery: lift Z a bit, settle, and retry
                 toolhead.wait_moves()
                 cur = toolhead.get_position()
-                toolhead.manual_move([None, None, cur[2] + self.recover_lift_mm], self.z_move_speed)
+                toolhead.manual_move(
+                    [None, None, cur[2] + self.recover_lift_mm],
+                    self.z_move_speed
+                )
                 toolhead.wait_moves()
-                if self.recover_pause_ms > 0:
-                    self.gcode.run_script_from_command("G4 P%i" % self.recover_pause_ms)
+                if self.recover_pause_ms:
+                    self.gcode.run_script_from_command(f"G4 P{self.recover_pause_ms}")
 
-        # If we still fail after retries, raise a clear error
-        raise gcmd.error(
-            "Axiscope: Probe kept triggering prior to movement after %i recovery attempts. "
-            "Increase safe_start_z / lift_z or check probe pin logic (invert/pullup). Last error: %s"
-            % (self.recover_max_attempts, str(last_err))
-        )
+        raise gcmd.error(f"Axiscope: Probe still triggered after recovery. {last_err}")
 
+    # ===========================
+    # FIX B: RELEASE AFTER EACH SAMPLE
+    # ===========================
     def _probe_zswitch(self, gcmd):
-        requested_samples = gcmd.get_int('SAMPLES', self.samples, minval=1)
-        max_samples = gcmd.get_int('SAMPLES_MAX_COUNT', self.samples_max_count, minval=requested_samples)
+        requested = gcmd.get_int('SAMPLES', self.samples, minval=1)
+        max_count = gcmd.get_int('SAMPLES_MAX_COUNT', self.samples_max_count, minval=requested)
         tolerance = gcmd.get_float('SAMPLES_TOLERANCE', self.samples_tolerance, minval=0.)
 
-        sample_results = []
-        for _ in range(max_samples):
-            sample_results.append(self._run_probe_with_recovery(gcmd))
+        toolhead = self.printer.lookup_object('toolhead')
+        samples = []
 
-            spread = max(sample_results) - min(sample_results)
-            if len(sample_results) >= requested_samples and spread <= tolerance:
-                return sum(sample_results) / len(sample_results)
+        for _ in range(max_count):
+            z = self._run_probe_with_recovery(gcmd)
+            samples.append(z)
 
-        spread = max(sample_results) - min(sample_results)
+            # IMPORTANT: always release the switch between samples
+            toolhead.wait_moves()
+            cur = toolhead.get_position()
+            target_z = max(cur[2] + self.recover_lift_mm, self.safe_start_z)
+            toolhead.manual_move([None, None, target_z], self.z_move_speed)
+            toolhead.wait_moves()
+
+            if len(samples) >= requested:
+                spread = max(samples) - min(samples)
+                if spread <= tolerance:
+                    return sum(samples) / len(samples)
+
+        spread = max(samples) - min(samples)
         raise gcmd.error(
-            "Probe sample spread %.5f exceeds tolerance %.5f after %i samples."
-            % (spread, tolerance, max_samples)
+            f"Probe spread {spread:.5f} exceeds tolerance {tolerance:.5f}"
         )
 
     def cmd_PROBE_ZSWITCH(self, gcmd):
-        toolhead  = self.printer.lookup_object('toolhead')
-        tool_no   = str(self.toolchanger.active_tool.tool_number)
+        toolhead = self.printer.lookup_object('toolhead')
+        tool_no = str(self.toolchanger.active_tool.tool_number)
         start_pos = toolhead.get_position()
 
-        z_result  = self._probe_zswitch(gcmd)
-
-        self.reactor = self.printer.get_reactor()
-        measured_time = self.reactor.monotonic()
+        z = self._probe_zswitch(gcmd)
+        t = self.printer.get_reactor().monotonic()
 
         if tool_no == "0":
-            self.probe_results[tool_no] = {'z_trigger': z_result, 'z_offset': 0, 'last_run': measured_time}
+            self.probe_results[tool_no] = {'z_trigger': z, 'z_offset': 0, 'last_run': t}
         elif "0" in self.probe_results:
-            z_offset = z_result - self.probe_results["0"]['z_trigger']
-            self.probe_results[tool_no] = {'z_trigger': z_result, 'z_offset': z_offset, 'last_run': measured_time}
-        else:
-            self.probe_results[tool_no] = {'z_trigger': z_result, 'z_offset': None, 'last_run': measured_time}
+            z_offset = z - self.probe_results["0"]['z_trigger']
+            self.probe_results[tool_no] = {'z_trigger': z, 'z_offset': z_offset, 'last_run': t}
 
-        # Return to the start position
         toolhead.move(start_pos, self.z_move_speed)
         toolhead.set_position(start_pos)
         toolhead.wait_moves()
 
-        return
-
-    cmd_CALIBRATE_ALL_Z_OFFSETS_help = "Probe the Z switch for each tool to determine offset."
-
-    def _get_calibration_tools(self, gcmd):
-        raw_tools = gcmd.get('TOOLS', None)
-        available_tools = [int(tool_no) for tool_no in self.toolchanger.tool_numbers]
-
-        if raw_tools is None or raw_tools.strip() == '':
-            return available_tools
-
-        selected_tools = []
-        for value in raw_tools.split(','):
-            value = value.strip()
-            if value == '':
-                continue
-
-            try:
-                tool_no = int(value)
-            except ValueError:
-                raise gcmd.error("Invalid tool '%s' in TOOLS. Use a comma-separated list like TOOLS=0,1,2" % value)
-
-            if tool_no not in available_tools:
-                raise gcmd.error("Tool T%i is not available. Available tools: %s" % (
-                    tool_no, ','.join(['T%i' % tool for tool in available_tools])
-                ))
-
-            if tool_no not in selected_tools:
-                selected_tools.append(tool_no)
-
-        if not selected_tools:
-            raise gcmd.error("No valid tools were provided in TOOLS.")
-
-        return selected_tools
-
     def cmd_CALIBRATE_ALL_Z_OFFSETS(self, gcmd):
         if not self.is_homed():
-            gcmd.respond_info('Must home first.')
+            gcmd.respond_error("Must home first")
             return
 
-        selected_tools = self._get_calibration_tools(gcmd)
-
-        # Run start_gcode at the beginning of calibration
         self.cmd_AXISCOPE_START_GCODE(gcmd)
 
-        for tool_no in selected_tools:
-            # Run before_pickup_gcode before tool change
+        for tool in self.toolchanger.tool_numbers:
             self.cmd_AXISCOPE_BEFORE_PICKUP_GCODE(gcmd)
-            self.gcode.run_script_from_command('T%i' % tool_no)
-            # Run after_pickup_gcode after tool change
+            self.gcode.run_script_from_command(f"T{tool}")
             self.cmd_AXISCOPE_AFTER_PICKUP_GCODE(gcmd)
 
-            self.gcode.run_script_from_command('MOVE_TO_ZSWITCH')
+            self.gcode.run_script_from_command("MOVE_TO_ZSWITCH")
             self.gcode.run_script_from_command(
-                'PROBE_ZSWITCH SAMPLES=%i SAMPLES_TOLERANCE=%.5f SAMPLES_MAX_COUNT=%i'
-                % (self.samples, self.samples_tolerance, self.samples_max_count)
+                f"PROBE_ZSWITCH SAMPLES={self.samples} "
+                f"SAMPLES_TOLERANCE={self.samples_tolerance} "
+                f"SAMPLES_MAX_COUNT={self.samples_max_count}"
             )
 
-        if 0 in self.toolchanger.tool_numbers:
-            self.gcode.run_script_from_command('T0')
-
-        toolhead = self.printer.lookup_object('toolhead')
-        toolhead.wait_moves()
-
-        for tool_no in self.probe_results:
-            if tool_no != "0" and self.probe_results[tool_no]['z_offset'] is not None:
-                gcmd.respond_info('T%s gcode_z_offset: %.3f' % (tool_no, self.probe_results[tool_no]['z_offset']))
-
-        # Run finish_gcode after calibration is complete
         self.cmd_AXISCOPE_FINISH_GCODE(gcmd)
 
-    # Command handlers for custom macro G-code commands
     def cmd_AXISCOPE_START_GCODE(self, gcmd):
-        """Execute the Axiscope start G-code macro"""
         if self.start_gcode:
-            self.run_gcode('start_gcode', self.start_gcode, {})
-        else:
-            gcmd.respond_info("No start_gcode configured for Axiscope")
+            self.start_gcode.run_gcode_from_command({})
 
     def cmd_AXISCOPE_BEFORE_PICKUP_GCODE(self, gcmd):
-        """Execute the Axiscope before pickup G-code macro"""
         if self.before_pickup_gcode:
-            self.run_gcode('before_pickup_gcode', self.before_pickup_gcode, {})
-        else:
-            gcmd.respond_info("No before_pickup_gcode configured for Axiscope")
+            self.before_pickup_gcode.run_gcode_from_command({})
 
     def cmd_AXISCOPE_AFTER_PICKUP_GCODE(self, gcmd):
-        """Execute the Axiscope after pickup G-code macro"""
         if self.after_pickup_gcode:
-            self.run_gcode('after_pickup_gcode', self.after_pickup_gcode, {})
-        else:
-            gcmd.respond_info("No after_pickup_gcode configured for Axiscope")
+            self.after_pickup_gcode.run_gcode_from_command({})
 
     def cmd_AXISCOPE_FINISH_GCODE(self, gcmd):
-        """Execute the Axiscope finish G-code macro"""
         if self.finish_gcode:
-            self.run_gcode('finish_gcode', self.finish_gcode, {})
-        else:
-            gcmd.respond_info("No finish_gcode configured for Axiscope")
-
-    cmd_AXISCOPE_SAVE_TOOL_OFFSET_help = "Save a tool offset to your axiscope config file."
-
-    def cmd_AXISCOPE_SAVE_TOOL_OFFSET(self, gcmd):
-        """
-        Save tool offsets for the specified tool.
-
-        Usage:
-          AXISCOPE_SAVE_TOOL_OFFSET TOOL_NAME=<tool_name> OFFSETS=<offsets>
-
-        Example:
-          AXISCOPE_SAVE_TOOL_OFFSET TOOL_NAME="tool T0" OFFSETS="[-0.01, 0.03, 0.01]"
-        """
-        if self.has_cfg_data is not False:
-            with open(self.config_file_path, 'r') as f:
-                cfg_data = f.readlines()
-
-            tool_name = gcmd.get('TOOL_NAME')
-            offsets   = ast.literal_eval(gcmd.get('OFFSETS'))
-
-            out_data = self.update_tool_offsets(cfg_data, tool_name, offsets)
-            gcmd.respond_info("Writing %s offsets." % tool_name)
-
-            with open(self.config_file_path, 'w') as f:
-                for line in out_data:
-                    f.write(line)
-
-                f.close()
-                gcmd.respond_info("Offsets written successfully.")
-        else:
-            gcmd.respond_info("Axiscope needs a valid config location (config_file_path) to save tool offsets.")
-
-    cmd_AXISCOPE_SAVE_MULTIPLE_TOOL_OFFSETS_help = "Save multiple tool offsets to your axiscope config file."
-
-    def cmd_AXISCOPE_SAVE_MULTIPLE_TOOL_OFFSETS(self, gcmd):
-        """
-        Save offsets for multiple tools.
-
-        Usage:
-          AXISCOPE_SAVE_MULTIPLE_TOOL_OFFSETS TOOLS=<tools> OFFSETS=<offsets>
-        """
-        if self.has_cfg_data is not False:
-            with open(self.config_file_path, 'r') as f:
-                cfg_data = f.readlines()
-
-            tool_names = gcmd.get('TOOLS')
-            offsets    = ast.literal_eval(gcmd.get('OFFSETS'))
-            out_data   = cfg_data
-
-            for i, tool_name in enumerate(tool_names):
-                out_data = self.update_tool_offsets(out_data, tool_name, offsets[i])
-
-            gcmd.respond_info("Writing %s offsets." % tool_name)
-
-            with open(self.config_file_path, 'w') as f:
-                for line in out_data:
-                    f.write(line)
-
-                f.close()
-                gcmd.respond_info("Offsets written successfully.")
-        else:
-            gcmd.respond_info("Axiscope needs a valid config location (config_file_path) to save tool offsets.")
+            self.finish_gcode.run_gcode_from_command({})
 
 def load_config(config):
     return Axiscope(config)

@@ -79,6 +79,9 @@ zswitch_z_pos: 7.8        # REQUIRED - Z position + some clearance of the endsto
 lift_z: 1                 # OPTIONAL - Amount to lift Z before moving (default: 1)
 move_speed: 60            # OPTIONAL - XY movement speed in mm/s (default: 60)
 z_move_speed: 10          # OPTIONAL - Z movement speed in mm/s (default: 10)
+samples: 10               # OPTIONAL - Minimum number of probe samples (default: 10)
+samples_tolerance: 0.02   # OPTIONAL - Max allowed spread between samples in mm (default: 0.02)
+samples_max_count: 15     # OPTIONAL - Max samples before calibration aborts (default: samples)
 start_gcode: M118 Starting calibration G28 -> QGL -> G28Z
              G28
              QUAD_GANTRY_LEVEL
@@ -117,6 +120,12 @@ Axiscope now supports templated G-code macros with full Jinja template support.
 - **before_pickup_gcode**: Executed before each tool change
 - **after_pickup_gcode**: Executed after each tool change
 - **finish_gcode**: Executed after calibration is complete
+
+You can also override sampling for a single run via G-code:
+
+```gcode
+PROBE_ZSWITCH SAMPLES=10 SAMPLES_TOLERANCE=0.02 SAMPLES_MAX_COUNT=15
+```
 
 
 

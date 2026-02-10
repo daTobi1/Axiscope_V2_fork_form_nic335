@@ -143,27 +143,35 @@ class Axiscope:
         tolerance = gcmd.get_float('SAMPLES_TOLERANCE', self.samples_tolerance, minval=0.)
 
         toolhead = self.printer.lookup_object('toolhead')
-        samples = []
+        total_taken = 0
+        last_spread = None
 
-        for _ in range(max_count):
-            z = self._run_probe_with_recovery(gcmd)
-            samples.append(z)
+        # Evaluate tolerance per batch of `requested` probes.
+        # If a batch fails tolerance, discard it and run a fresh batch.
+        while total_taken + requested <= max_count:
+            batch_samples = []
 
-            # IMPORTANT: always release the switch between samples
-            toolhead.wait_moves()
-            cur = toolhead.get_position()
-            target_z = max(cur[2] + self.recover_lift_mm, self.safe_start_z)
-            toolhead.manual_move([None, None, target_z], self.z_move_speed)
-            toolhead.wait_moves()
+            for _ in range(requested):
+                z = self._run_probe_with_recovery(gcmd)
+                batch_samples.append(z)
+                total_taken += 1
 
-            if len(samples) >= requested:
-                spread = max(samples) - min(samples)
-                if spread <= tolerance:
-                    return sum(samples) / len(samples)
+                # IMPORTANT: always release the switch between samples
+                toolhead.wait_moves()
+                cur = toolhead.get_position()
+                target_z = max(cur[2] + self.recover_lift_mm, self.safe_start_z)
+                toolhead.manual_move([None, None, target_z], self.z_move_speed)
+                toolhead.wait_moves()
 
-        spread = max(samples) - min(samples)
+            spread = max(batch_samples) - min(batch_samples)
+            last_spread = spread
+            if spread <= tolerance:
+                return sum(batch_samples) / len(batch_samples)
+
+        attempted_batches = max_count // requested
         raise gcmd.error(
-            f"Probe spread {spread:.5f} exceeds tolerance {tolerance:.5f}"
+            f"Probe spread {last_spread:.5f} exceeds tolerance {tolerance:.5f} "
+            f"after {attempted_batches} batch(es) of {requested} samples"
         )
 
     def cmd_PROBE_ZSWITCH(self, gcmd):

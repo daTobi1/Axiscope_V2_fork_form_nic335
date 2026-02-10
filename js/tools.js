@@ -246,16 +246,7 @@ function getProbeResults() {
   var url = printerUrl(printerIp, "/printer/objects/query?axiscope");
   return $.get(url).then(function(data) {
     const hasProbeResults = data.result?.status?.axiscope?.probe_results != null;
-    // Update calibration button state
-    const $calibrateBtn = $('#calibrate-all-btn');
-    if ($calibrateBtn.length) {
-      if (hasProbeResults) {
-        $calibrateBtn.removeClass('btn-secondary').addClass('btn-primary').prop('disabled', false);
-      } else {
-        $calibrateBtn.removeClass('btn-primary').addClass('btn-secondary').prop('disabled', true);
-      }
-    }
-    
+
     if (hasProbeResults) {
       return data.result.status.axiscope.probe_results;
     }
@@ -421,9 +412,9 @@ function getTools() {
       });
 
       // Add calibration button after all tools
-      getProbeResults().then(results => {
-        const hasProbeResults = Object.keys(results).length > 0;
-        $("#tool-list").append(calibrateButton(hasProbeResults, tool_numbers));
+      getProbeResults().then(() => {
+        // Calibration should stay triggerable even if probe results are empty.
+        $("#tool-list").append(calibrateButton(true, tool_numbers));
       });
       
       // Check if axiscope is available

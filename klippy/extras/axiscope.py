@@ -143,9 +143,7 @@ class Axiscope:
 
         raise gcmd.error(f"Axiscope: Probe still triggered after recovery. {last_err}")
 
-    # ===========================
-    # FIX B: RELEASE AFTER EACH SAMPLE
-    # ===========================
+    # Release the switch between samples and evaluate in batches.
     def _probe_zswitch(self, gcmd):
         requested = gcmd.get_int('SAMPLES', self.samples, minval=1)
         max_count = gcmd.get_int('SAMPLES_MAX_COUNT', self.samples_max_count, minval=requested)

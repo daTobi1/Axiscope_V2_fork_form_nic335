@@ -1,5 +1,8 @@
 
-const zeroListItem = ({tool_number, disabled, tc_disabled}) => `
+let availableToolNumbers = [];
+let activeToolNumber = 0;
+
+const zeroListItem = ({tool_number, disabled, tc_disabled, xy_reference_tool}) => `
 <li class="list-group-item bg-body-tertiary p-2">
   <div class="container">
     <div class="row">
@@ -16,9 +19,22 @@ const zeroListItem = ({tool_number, disabled, tc_disabled}) => `
       </div>
 
       <div class="col-6" >
+        <div class="row pb-2">
+          <div class="col-12">
+            <label for="xy-reference-tool" class="form-label mb-1"><small>XY reference tool</small></label>
+            <input
+              type="number"
+              class="form-control form-control-sm"
+              id="xy-reference-tool"
+              min="0"
+              step="1"
+              value="${xy_reference_tool}"
+            >
+          </div>
+        </div>
         <button 
           type="button" 
-          class="btn btn-sm btn-secondary fs-6 border text-center h-100 w-100 ps-5 pe-5 ${disabled}" 
+          class="btn btn-sm btn-secondary fs-6 border text-center w-100 ps-5 pe-5 ${disabled}" 
           style="padding-bottom:5px; padding-top:5px;" 
           id="capture-pos"
           >
@@ -186,6 +202,35 @@ const nonZeroListItem = ({tool_number, cx_offset, cy_offset, disabled, tc_disabl
 `;
 
 
+function getSelectedXyReferenceTool() {
+  const inputValue = String($('#xy-reference-tool').val() ?? '').trim();
+  const fallback = availableToolNumbers.length ? Number(availableToolNumbers[0]) : 0;
+
+  if (!/^\d+$/.test(inputValue)) {
+    return fallback;
+  }
+
+  const referenceTool = Number.parseInt(inputValue, 10);
+  if (!availableToolNumbers.includes(referenceTool)) {
+    return fallback;
+  }
+
+  return referenceTool;
+}
+
+function updateCaptureButtonState() {
+  const $captureBtn = $('#capture-pos');
+  if (!$captureBtn.length) {
+    return;
+  }
+
+  const referenceTool = getSelectedXyReferenceTool();
+  const isEnabled = Number(activeToolNumber) === Number(referenceTool);
+
+  $captureBtn.toggleClass('disabled', !isEnabled).prop('disabled', !isEnabled);
+  $captureBtn.attr('title', isEnabled ? '' : `Switch to T${referenceTool} to capture XY reference position`);
+}
+
 function toolChangeURL(tool) {
   var x_pos = $("#captured-x").find(":first-child").text();
   var y_pos = $("#captured-y").find(":first-child").text();
@@ -302,23 +347,47 @@ function updateAllProbeResults() {
   });
 }
 
-function calibrateButton(isEnabled = false) {
+function calibrateButton(isEnabled = false, toolNumbers = []) {
   const buttonClass = isEnabled ? 'btn-primary' : 'btn-secondary';
   const disabledAttr = isEnabled ? '' : 'disabled';
+  const defaultTools = toolNumbers.join(',');
   return `
 <li class="list-group-item bg-body-tertiary p-2">
   <div class="container">
+    <div class="row pb-2">
+      <div class="col-8">
+        <label for="z-calibration-tools" class="form-label mb-1"><small>Tools for Z calibration (comma separated, e.g. 0,1,2)</small></label>
+        <input 
+          type="text" 
+          class="form-control form-control-sm"
+          id="z-calibration-tools"
+          placeholder="${defaultTools}"
+          value="${defaultTools}"
+        >
+      </div>
+      <div class="col-4">
+        <label for="z-calibration-reference" class="form-label mb-1"><small>Reference tool</small></label>
+        <input
+          type="number"
+          class="form-control form-control-sm"
+          id="z-calibration-reference"
+          min="0"
+          step="1"
+          value="${toolNumbers.length ? toolNumbers[0] : 0}"
+        >
+      </div>
+    </div>
     <div class="row">
       <div class="col-12" >
         <button 
           type="button" 
           class="btn btn-sm ${buttonClass} fs-6 border text-center h-100 w-100" 
           style="padding-top:15px;" 
-          onclick="calibrateAllTools()"
+          onclick="calibrateAllTools('${defaultTools}')"
           ${disabledAttr}
           id="calibrate-all-btn"
         >
-          CALIBRATE ALL Z-OFFSETS
+          CALIBRATE Z-OFFSETS
         </button>
       </div>
     </div>
@@ -327,11 +396,51 @@ function calibrateButton(isEnabled = false) {
 `;
 }
 
-function calibrateAllTools() {
-  const url = printerUrl(printerIp, "/printer/gcode/script?script=CALIBRATE_ALL_Z_OFFSETS");
+function sanitizeToolSelection(selection) {
+  if (!selection) {
+    return [];
+  }
+
+  const seen = new Set();
+  return selection
+    .split(',')
+    .map(value => value.trim())
+    .filter(value => /^\d+$/.test(value))
+    .filter(value => {
+      if (seen.has(value)) {
+        return false;
+      }
+      seen.add(value);
+      return true;
+    });
+}
+
+function calibrateAllTools(defaultTools = '') {
+  const selectedToolsRaw = $('#z-calibration-tools').val() || defaultTools;
+  const selectedTools = sanitizeToolSelection(selectedToolsRaw);
+
+  if (!selectedTools.length) {
+    console.error('No valid tools selected for Z-offset calibration');
+    return;
+  }
+
+  const referenceInput = $('#z-calibration-reference').val();
+  const fallbackReference = selectedTools[0];
+  const referenceTool = /^\d+$/.test(String(referenceInput).trim()) ? String(parseInt(referenceInput, 10)) : fallbackReference;
+
+  if (!selectedTools.includes(referenceTool)) {
+    console.error(`Reference tool T${referenceTool} must be part of selected tools: ${selectedTools.join(',')}`);
+    return;
+  }
+
+  const toolsParam = encodeURIComponent(selectedTools.join(','));
+  const referenceParam = encodeURIComponent(referenceTool);
+  const url = printerUrl(printerIp, `/printer/gcode/script?script=CALIBRATE_ALL_Z_OFFSETS TOOLS=${toolsParam} REFERENCE_TOOL=${referenceParam}`);
   $.get(url)
     .done(function() {
-      console.log("Started Z-offset calibration");
+      $('#z-calibration-tools').val(selectedTools.join(','));
+      $('#z-calibration-reference').val(referenceTool);
+      console.log(`Started Z-offset calibration for tools: ${selectedTools.join(',')} (reference: T${referenceTool})`);
     })
     .fail(function(error) {
       console.error("Failed to start calibration:", error);
@@ -348,6 +457,9 @@ function getTools() {
     tool_names   = data['result']['status']['toolchanger']['tool_names'];
     tool_numbers = data['result']['status']['toolchanger']['tool_numbers'];
     active_tool  = data['result']['status']['toolchanger']['tool_number'];
+
+    availableToolNumbers = tool_numbers.map(toolNumber => Number(toolNumber));
+    activeToolNumber = Number(active_tool);
 
     url = printerUrl(printerIp, "/printer/objects/query?")
 
@@ -372,7 +484,8 @@ function getTools() {
         }
         
         if (tool_number === 0) {
-          $("#tool-list").append(zeroListItem({tool_number: tool_number, disabled: disabled, tc_disabled: tc_disabled}));
+          const xyReferenceTool = tool_numbers.length ? tool_numbers[0] : 0;
+          $("#tool-list").append(zeroListItem({tool_number: tool_number, disabled: disabled, tc_disabled: tc_disabled, xy_reference_tool: xyReferenceTool}));
         } else {
           $("#tool-list").append(nonZeroListItem({tool_number: tool_number, cx_offset: cx_offset, cy_offset: cy_offset, disabled: disabled, tc_disabled: tc_disabled}));
         }
@@ -381,7 +494,7 @@ function getTools() {
       // Add calibration button after all tools
       getProbeResults().then(results => {
         const hasProbeResults = Object.keys(results).length > 0;
-        $("#tool-list").append(calibrateButton(hasProbeResults));
+        $("#tool-list").append(calibrateButton(hasProbeResults, tool_numbers));
       });
       
       // Check if axiscope is available
@@ -444,6 +557,7 @@ function getTools() {
     });
 
     updateTools(tool_numbers, active_tool);
+    updateCaptureButtonState();
     
     // Start periodic updates after initial tool load
     startProbeResultsUpdates();
@@ -452,12 +566,8 @@ function getTools() {
 
 
 function updateTools(tool_numbers, tn){
-  const $captureBtn = $("#capture-pos");
-  if(tn !== 0) {
-    $captureBtn.addClass("disabled").prop("disabled", true);
-  } else {
-    $captureBtn.removeClass("disabled").prop("disabled", false);
-  }
+  activeToolNumber = Number(tn);
+  updateCaptureButtonState();
 
   $.each(tool_numbers, function(tool_no) {
     updateOffset(tool_no, "x");
@@ -520,3 +630,15 @@ function updateOffset(tool, axis) {
         $(`#T${tool}-${axis}-new`).find('>:first-child').text('0.0');
     }
 }
+
+
+$(document).on("change", "#xy-reference-tool", function() {
+  const fallback = availableToolNumbers.length ? Number(availableToolNumbers[0]) : 0;
+  const referenceTool = getSelectedXyReferenceTool();
+
+  if (referenceTool !== Number.parseInt(String($(this).val() || fallback), 10)) {
+    $(this).val(referenceTool);
+  }
+
+  updateCaptureButtonState();
+});

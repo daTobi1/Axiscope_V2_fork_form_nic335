@@ -305,37 +305,27 @@ function updateAllProbeResults() {
   });
 }
 
-function calibrateButton(isEnabled = false, toolNumbers = []) {
+function calibrateButton(isEnabled = false) {
   const buttonClass = isEnabled ? 'btn-primary' : 'btn-secondary';
   const disabledAttr = isEnabled ? '' : 'disabled';
-  const defaultTools = toolNumbers.join(',');
   return `
 <li class="list-group-item bg-body-tertiary p-2">
-  <div class="container">
-    <div class="row pb-2">
-      <div class="col-12">
-        <label for="z-calibration-tools" class="form-label mb-1"><small>Tools for Z calibration (comma separated, e.g. 0,1,2)</small></label>
-        <div class="form-text mb-1"><small>Select which tools should be included for Z-offset calculation.</small></div>
-        <input 
-          type="text" 
-          class="form-control form-control-sm"
-          id="z-calibration-tools"
-          placeholder="${defaultTools}"
-          value="${defaultTools}"
-        >
-      </div>
-    </div>
+  <div class="container">r">
+ |  | 
+314
+ 
+
     <div class="row">
       <div class="col-12" >
         <button 
           type="button" 
           class="btn btn-sm ${buttonClass} fs-6 border text-center h-100 w-100" 
           style="padding-top:15px;" 
-          onclick="calibrateAllTools('${defaultTools}')"
+          onclick="calibrateAllTools()"
           ${disabledAttr}
           id="calibrate-all-btn"
         >
-          CALIBRATE Z-OFFSETS
+          CALIBRATE ALL Z-OFFSETS
         </button>
       </div>
     </div>
@@ -344,40 +334,11 @@ function calibrateButton(isEnabled = false, toolNumbers = []) {
 `;
 }
 
-function sanitizeToolSelection(selection) {
-  if (!selection) {
-    return [];
-  }
-
-  const seen = new Set();
-  return selection
-    .split(',')
-    .map(value => value.trim())
-    .filter(value => /^\d+$/.test(value))
-    .filter(value => {
-      if (seen.has(value)) {
-        return false;
-      }
-      seen.add(value);
-      return true;
-    });
-}
-
-function calibrateAllTools(defaultTools = '') {
-  const selectedToolsRaw = $('#z-calibration-tools').val() || defaultTools;
-  const selectedTools = sanitizeToolSelection(selectedToolsRaw);
-
-  if (!selectedTools.length) {
-    console.error('No valid tools selected for Z-offset calibration');
-    return;
-  }
-
-  const script = `CALIBRATE_ALL_Z_OFFSETS TOOLS=${selectedTools.join(',')}`;
-  const url = printerUrl(printerIp, `/printer/gcode/script?script=${encodeURIComponent(script)}`);
+function calibrateAllTools() {
+  const url = printerUrl(printerIp, "/printer/gcode/script?script=CALIBRATE_ALL_Z_OFFSETS");
   $.get(url)
     .done(function() {
-      $('#z-calibration-tools').val(selectedTools.join(','));
-      console.log("Started Z-offset calibration for tools:", selectedTools.join(','));
+      console.log("Started Z-offset calibration");
     })
     .fail(function(error) {
       console.error("Failed to start calibration:", error);
@@ -461,8 +422,21 @@ function getTools() {
       console.error('Error loading tool status:', error);
     });
 
-    // Trigger one initial status read to show Z fields and populate values.
-    updateAllProbeResults();
+      // Add calibration button after all tools
+      getProbeResults().then(results => {
+        const hasProbeResults = Object.keys(results).length > 0;
+        $("#tool-list").append(calibrateButton(hasProbeResults));
+      });
+      
+      // Check if axiscope is available
+      $.get(printerUrl(printerIp, "/printer/objects/query?axiscope")).then(function(data) {
+        const hasProbeResults = data.result?.status?.axiscope?.probe_results != null;
+        if (hasProbeResults) {
+          $('.z-fields').removeClass('d-none');
+        }
+      }).catch(function(error) {
+        console.error('Error checking axiscope availability:', error);
+      });
 
     // Set up copy handlers for all tools
     tool_numbers.forEach(tool => {

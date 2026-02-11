@@ -127,6 +127,8 @@ You can also override sampling for a single run via G-code:
 PROBE_ZSWITCH SAMPLES=10 SAMPLES_TOLERANCE=0.02 SAMPLES_MAX_COUNT=15
 ```
 
+For `CALIBRATE_ALL_Z_OFFSETS TOOLS=...`, tool `T0` is always included as the reference probe. You can still limit which non-reference tools are calibrated.
+
 
 
 If you plan on using hostname to connect to your printer, For example voron.local:3000, you will need to add the following to your moonraker.conf: `*.local:*`

@@ -5,6 +5,7 @@ from statistics import median
 from . import tools_calibrate
 from . import toolchanger
 
+
 class Axiscope:
     def __init__(self, config):
         self.printer       = config.get_printer()
@@ -160,7 +161,6 @@ class Axiscope:
         total_taken = 0
         last_spread = None
 
-
         # Evaluate tolerance per batch of `requested` probes.
         # If a batch fails tolerance, discard it and run a fresh batch.
         while total_taken + requested <= max_count:
@@ -182,118 +182,6 @@ class Axiscope:
             last_spread = spread
             if spread <= tolerance:
                 return median(batch_samples)
-
-
-        # Evaluate tolerance per batch of `requested` probes.
-        # If a batch fails tolerance, discard it and run a fresh batch.
-        while total_taken + requested <= max_count:
-            batch_samples = []
-
-            for _ in range(requested):
-                z = self._run_probe_with_recovery(gcmd)
-                batch_samples.append(z)
-                total_taken += 1
-
-                # IMPORTANT: always release the switch between samples
-                toolhead.wait_moves()
-                cur = toolhead.get_position()
-                target_z = max(cur[2] + self.recover_lift_mm, self.safe_start_z)
-                toolhead.manual_move([None, None, target_z], self.z_move_speed)
-                toolhead.wait_moves()
-
-            spread = max(batch_samples) - min(batch_samples)
-            last_spread = spread
-            if spread <= tolerance:
-                return median(batch_samples)
-
-
-        # Evaluate tolerance per batch of `requested` probes.
-        # If a batch fails tolerance, discard it and run a fresh batch.
-        while total_taken + requested <= max_count:
-            batch_samples = []
-
-            for _ in range(requested):
-                z = self._run_probe_with_recovery(gcmd)
-                batch_samples.append(z)
-                total_taken += 1
-
-                # IMPORTANT: always release the switch between samples
-                toolhead.wait_moves()
-                cur = toolhead.get_position()
-                target_z = max(cur[2] + self.recover_lift_mm, self.safe_start_z)
-                toolhead.manual_move([None, None, target_z], self.z_move_speed)
-                toolhead.wait_moves()
-
-            spread = max(batch_samples) - min(batch_samples)
-            last_spread = spread
-            if spread <= tolerance:
-                return median(batch_samples)
-
-
-            for _ in range(requested):
-                z = self._run_probe_with_recovery(gcmd)
-                batch_samples.append(z)
-                total_taken += 1
-
-                # IMPORTANT: always release the switch between samples
-                toolhead.wait_moves()
-                cur = toolhead.get_position()
-                target_z = max(cur[2] + self.recover_lift_mm, self.safe_start_z)
-                toolhead.manual_move([None, None, target_z], self.z_move_speed)
-                toolhead.wait_moves()
-
-            spread = max(batch_samples) - min(batch_samples)
-            last_spread = spread
-            if spread <= tolerance:
-                return median(batch_samples)
-
-        # Evaluate tolerance per batch of `requested` probes.
-        # If a batch fails tolerance, discard it and run a fresh batch.
-        while total_taken + requested <= max_count:
-            batch_samples = []
-
-            for _ in range(requested):
-                z = self._run_probe_with_recovery(gcmd)
-                batch_samples.append(z)
-                total_taken += 1
-
-                # IMPORTANT: always release the switch between samples
-                toolhead.wait_moves()
-                cur = toolhead.get_position()
-                target_z = max(cur[2] + self.recover_lift_mm, self.safe_start_z)
-                toolhead.manual_move([None, None, target_z], self.z_move_speed)
-                toolhead.wait_moves()
-
-            spread = max(batch_samples) - min(batch_samples)
-            last_spread = spread
-            if spread <= tolerance:
-                return median(batch_samples)
-
-
-                # IMPORTANT: always release the switch between samples
-                toolhead.wait_moves()
-                cur = toolhead.get_position()
-                target_z = max(cur[2] + self.recover_lift_mm, self.safe_start_z)
-                toolhead.manual_move([None, None, target_z], self.z_move_speed)
-                toolhead.wait_moves()
-
-            spread = max(batch_samples) - min(batch_samples)
-            last_spread = spread
-            if spread <= tolerance:
-                return median(batch_samples)
-
-
-                # IMPORTANT: always release the switch between samples
-                toolhead.wait_moves()
-                cur = toolhead.get_position()
-                target_z = max(cur[2] + self.recover_lift_mm, self.safe_start_z)
-                toolhead.manual_move([None, None, target_z], self.z_move_speed)
-                toolhead.wait_moves()
-
-            spread = max(batch_samples) - min(batch_samples)
-            last_spread = spread
-            if spread <= tolerance:
-                return sum(batch_samples) / len(batch_samples)
 
         attempted_batches = max_count // requested
         raise gcmd.error(
@@ -312,8 +200,8 @@ class Axiscope:
         if tool_no == "0":
             self.probe_results[tool_no] = {'z_trigger': z, 'z_offset': 0, 'last_run': t}
         elif "0" in self.probe_results:
-            # Offset formula per calibration flow: reference_z - tool_z
-            z_offset = self.probe_results["0"]['z_trigger'] - z
+            # FIX: Correct sign. Offset should be tool_z - reference_z (NOT reference_z - tool_z)
+            z_offset = z - self.probe_results["0"]['z_trigger']
             self.probe_results[tool_no] = {'z_trigger': z, 'z_offset': z_offset, 'last_run': t}
         else:
             self.probe_results[tool_no] = {'z_trigger': z, 'z_offset': 0, 'last_run': t}
@@ -385,6 +273,7 @@ class Axiscope:
     def cmd_AXISCOPE_FINISH_GCODE(self, gcmd):
         if self.finish_gcode:
             self.finish_gcode.run_gcode_from_command({})
+
 
 def load_config(config):
     return Axiscope(config)

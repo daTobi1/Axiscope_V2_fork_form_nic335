@@ -306,9 +306,6 @@ function calibrateButton(toolNumbers = [], isEnabled = false) {
   const buttonClass = isEnabled ? 'btn-primary' : 'btn-secondary';
   const disabledAttr = isEnabled ? '' : 'disabled';
   const sortedTools = [...toolNumbers].sort((a, b) => a - b);
-  const nonReferenceTools = sortedTools.filter((tool) => tool !== 0);
-  const hasNonReferenceTools = nonReferenceTools.length > 0;
-
   const toolSelectorMarkup = sortedTools.map((tool) => {
     const isReferenceTool = tool === 0;
     const checkedAttr = isReferenceTool ? 'checked' : '';
@@ -324,7 +321,6 @@ function calibrateButton(toolNumbers = [], isEnabled = false) {
           value="${tool}"
           ${checkedAttr}
           ${disabledToolAttr}
-          onchange="syncCalibrationSelectAll()"
         >
         <label class="form-check-label" for="calibrate-tool-${tool}">
           T${tool} ${helperText}
@@ -333,20 +329,6 @@ function calibrateButton(toolNumbers = [], isEnabled = false) {
     `;
   }).join('');
 
-  const selectAllMarkup = hasNonReferenceTools ? `
-    <div class="form-check mt-2">
-      <input
-        class="form-check-input"
-        type="checkbox"
-        id="calibrate-select-all"
-        onchange="toggleAllCalibrationTools(this.checked)"
-      >
-      <label class="form-check-label" for="calibrate-select-all">
-        Select all available tools
-      </label>
-    </div>
-  ` : '';
-
   return `
 <li class="list-group-item bg-body-tertiary p-2">
   <div class="container">
@@ -354,7 +336,6 @@ function calibrateButton(toolNumbers = [], isEnabled = false) {
       <div class="col-12 text-start">
         <span class="fs-6">Tools to calibrate:</span><br/>
         ${toolSelectorMarkup}
-        ${selectAllMarkup}
       </div>
     </div>
     <div class="row">

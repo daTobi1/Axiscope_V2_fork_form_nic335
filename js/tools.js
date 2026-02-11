@@ -1,4 +1,3 @@
-
 const zeroListItem = ({tool_number, disabled, tc_disabled}) => `
 <li class="list-group-item bg-body-tertiary p-2">
   <div class="container">
@@ -268,7 +267,7 @@ function getProbeResults() {
 
 function updateProbeResults(tool_number, probeResults) {
   if (probeResults[tool_number]) {
-  const result = probeResults[tool_number];
+    const result = probeResults[tool_number];
     // Update Z-Trigger for all tools
     $(`#T${tool_number}-z-trigger`).find('>:first-child').text(result.z_trigger.toFixed(3));
     
@@ -306,6 +305,22 @@ function calibrateButton(toolNumbers = [], isEnabled = false) {
   const buttonClass = isEnabled ? 'btn-primary' : 'btn-secondary';
   const disabledAttr = isEnabled ? '' : 'disabled';
   const sortedTools = [...toolNumbers].sort((a, b) => a - b);
+
+  // --- NEW: Select all checkbox (only if there are optional tools besides T0) ---
+  const hasOptionalTools = sortedTools.some((tool) => tool !== 0);
+  const selectAllMarkup = hasOptionalTools ? `
+    <div class="form-check form-check-inline">
+      <input
+        class="form-check-input"
+        type="checkbox"
+        id="calibrate-select-all"
+      >
+      <label class="form-check-label" for="calibrate-select-all">
+        Select all
+      </label>
+    </div>
+  ` : '';
+
   const toolSelectorMarkup = sortedTools.map((tool) => {
     const isReferenceTool = tool === 0;
     const checkedAttr = isReferenceTool ? 'checked' : '';
@@ -335,6 +350,7 @@ function calibrateButton(toolNumbers = [], isEnabled = false) {
     <div class="row pb-2">
       <div class="col-12 text-start">
         <span class="fs-6">Tools to calibrate:</span><br/>
+        ${selectAllMarkup}
         ${toolSelectorMarkup}
       </div>
     </div>
@@ -378,6 +394,33 @@ function syncCalibrationSelectAll() {
   }
 
   selectAllCheckbox.checked = optionalToolCheckboxes.every((checkbox) => checkbox.checked);
+}
+
+// --- NEW: Bind events for select-all + per-tool sync (must be called after rendering) ---
+function bindCalibrationToolSelectors() {
+  const selectAllCheckbox = document.getElementById('calibrate-select-all');
+  const toolCheckboxes = Array.from(document.querySelectorAll('.calibrate-tool-checkbox'));
+
+  if (selectAllCheckbox) {
+    selectAllCheckbox.onchange = function() {
+      toggleAllCalibrationTools(selectAllCheckbox.checked);
+      // keep it consistent
+      syncCalibrationSelectAll();
+    };
+  }
+
+  toolCheckboxes.forEach((checkbox) => {
+    checkbox.onchange = function() {
+      // enforce T0 as always checked
+      if (checkbox.disabled) {
+        checkbox.checked = true;
+      }
+      syncCalibrationSelectAll();
+    };
+  });
+
+  // set initial state
+  syncCalibrationSelectAll();
 }
 
 function calibrateAllTools() {
@@ -445,6 +488,9 @@ function getTools() {
       getProbeResults().then(results => {
         const hasProbeResults = Object.keys(results).length > 0;
         $("#tool-list").append(calibrateButton(tool_numbers, hasProbeResults));
+
+        // --- NEW: bind select-all + sync after the calibration UI exists ---
+        bindCalibrationToolSelectors();
       });
       
       // Check if axiscope is available

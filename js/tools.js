@@ -348,13 +348,36 @@ function calibrateButton(toolNumbers = [], isEnabled = false) {
           ${disabledAttr}
           id="calibrate-all-btn"
         >
-          CALIBRATE ALL Z-OFFSETS
+          CALIBRATE Z-OFFSETS
         </button>
       </div>
     </div>
   </div>
 </li>
 `;
+}
+
+function toggleAllCalibrationTools(checked) {
+  document.querySelectorAll('.calibrate-tool-checkbox').forEach((checkbox) => {
+    if (!checkbox.disabled) {
+      checkbox.checked = checked;
+    }
+  });
+}
+
+function syncCalibrationSelectAll() {
+  const selectAllCheckbox = document.getElementById('calibrate-select-all');
+  if (!selectAllCheckbox) {
+    return;
+  }
+
+  const optionalToolCheckboxes = Array.from(document.querySelectorAll('.calibrate-tool-checkbox:not(:disabled)'));
+  if (!optionalToolCheckboxes.length) {
+    selectAllCheckbox.checked = false;
+    return;
+  }
+
+  selectAllCheckbox.checked = optionalToolCheckboxes.every((checkbox) => checkbox.checked);
 }
 
 function calibrateAllTools() {

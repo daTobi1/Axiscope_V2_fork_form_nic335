@@ -302,12 +302,42 @@ function updateAllProbeResults() {
   });
 }
 
-function calibrateButton(isEnabled = false) {
+function calibrateButton(toolNumbers = [], isEnabled = false) {
   const buttonClass = isEnabled ? 'btn-primary' : 'btn-secondary';
   const disabledAttr = isEnabled ? '' : 'disabled';
+  const sortedTools = [...toolNumbers].sort((a, b) => a - b);
+  const toolSelectorMarkup = sortedTools.map((tool) => {
+    const isReferenceTool = tool === 0;
+    const checkedAttr = isReferenceTool ? 'checked' : '';
+    const disabledToolAttr = isReferenceTool ? 'disabled' : '';
+    const helperText = isReferenceTool ? '<small class="text-secondary">(Reference, required)</small>' : '';
+
+    return `
+      <div class="form-check form-check-inline">
+        <input
+          class="form-check-input calibrate-tool-checkbox"
+          type="checkbox"
+          id="calibrate-tool-${tool}"
+          value="${tool}"
+          ${checkedAttr}
+          ${disabledToolAttr}
+        >
+        <label class="form-check-label" for="calibrate-tool-${tool}">
+          T${tool} ${helperText}
+        </label>
+      </div>
+    `;
+  }).join('');
+
   return `
 <li class="list-group-item bg-body-tertiary p-2">
   <div class="container">
+    <div class="row pb-2">
+      <div class="col-12 text-start">
+        <span class="fs-6">Tools to calibrate:</span><br/>
+        ${toolSelectorMarkup}
+      </div>
+    </div>
     <div class="row">
       <div class="col-12" >
         <button 
@@ -328,10 +358,20 @@ function calibrateButton(isEnabled = false) {
 }
 
 function calibrateAllTools() {
-  const url = printerUrl(printerIp, "/printer/gcode/script?script=CALIBRATE_ALL_Z_OFFSETS");
+  const selectedTools = Array.from(document.querySelectorAll('.calibrate-tool-checkbox:checked'))
+    .map((checkbox) => parseInt(checkbox.value, 10))
+    .filter((tool) => !Number.isNaN(tool));
+
+  if (!selectedTools.includes(0)) {
+    selectedTools.unshift(0);
+  }
+
+  const toolArgument = selectedTools.length ? ` TOOLS=${selectedTools.join(',')}` : '';
+  const url = printerUrl(printerIp, `/printer/gcode/script?script=CALIBRATE_ALL_Z_OFFSETS${toolArgument}`);
+
   $.get(url)
     .done(function() {
-      console.log("Started Z-offset calibration");
+      console.log(`Started Z-offset calibration for tools: ${selectedTools.join(', ')}`);
     })
     .fail(function(error) {
       console.error("Failed to start calibration:", error);
@@ -381,7 +421,7 @@ function getTools() {
       // Add calibration button after all tools
       getProbeResults().then(results => {
         const hasProbeResults = Object.keys(results).length > 0;
-        $("#tool-list").append(calibrateButton(hasProbeResults));
+        $("#tool-list").append(calibrateButton(tool_numbers, hasProbeResults));
       });
       
       // Check if axiscope is available

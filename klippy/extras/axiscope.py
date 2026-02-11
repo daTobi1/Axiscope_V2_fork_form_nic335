@@ -160,6 +160,7 @@ class Axiscope:
         total_taken = 0
         last_spread = None
 
+
         # Evaluate tolerance per batch of `requested` probes.
         # If a batch fails tolerance, discard it and run a fresh batch.
         while total_taken + requested <= max_count:
@@ -181,6 +182,118 @@ class Axiscope:
             last_spread = spread
             if spread <= tolerance:
                 return median(batch_samples)
+
+
+        # Evaluate tolerance per batch of `requested` probes.
+        # If a batch fails tolerance, discard it and run a fresh batch.
+        while total_taken + requested <= max_count:
+            batch_samples = []
+
+            for _ in range(requested):
+                z = self._run_probe_with_recovery(gcmd)
+                batch_samples.append(z)
+                total_taken += 1
+
+                # IMPORTANT: always release the switch between samples
+                toolhead.wait_moves()
+                cur = toolhead.get_position()
+                target_z = max(cur[2] + self.recover_lift_mm, self.safe_start_z)
+                toolhead.manual_move([None, None, target_z], self.z_move_speed)
+                toolhead.wait_moves()
+
+            spread = max(batch_samples) - min(batch_samples)
+            last_spread = spread
+            if spread <= tolerance:
+                return median(batch_samples)
+
+
+        # Evaluate tolerance per batch of `requested` probes.
+        # If a batch fails tolerance, discard it and run a fresh batch.
+        while total_taken + requested <= max_count:
+            batch_samples = []
+
+            for _ in range(requested):
+                z = self._run_probe_with_recovery(gcmd)
+                batch_samples.append(z)
+                total_taken += 1
+
+                # IMPORTANT: always release the switch between samples
+                toolhead.wait_moves()
+                cur = toolhead.get_position()
+                target_z = max(cur[2] + self.recover_lift_mm, self.safe_start_z)
+                toolhead.manual_move([None, None, target_z], self.z_move_speed)
+                toolhead.wait_moves()
+
+            spread = max(batch_samples) - min(batch_samples)
+            last_spread = spread
+            if spread <= tolerance:
+                return median(batch_samples)
+
+
+            for _ in range(requested):
+                z = self._run_probe_with_recovery(gcmd)
+                batch_samples.append(z)
+                total_taken += 1
+
+                # IMPORTANT: always release the switch between samples
+                toolhead.wait_moves()
+                cur = toolhead.get_position()
+                target_z = max(cur[2] + self.recover_lift_mm, self.safe_start_z)
+                toolhead.manual_move([None, None, target_z], self.z_move_speed)
+                toolhead.wait_moves()
+
+            spread = max(batch_samples) - min(batch_samples)
+            last_spread = spread
+            if spread <= tolerance:
+                return median(batch_samples)
+
+        # Evaluate tolerance per batch of `requested` probes.
+        # If a batch fails tolerance, discard it and run a fresh batch.
+        while total_taken + requested <= max_count:
+            batch_samples = []
+
+            for _ in range(requested):
+                z = self._run_probe_with_recovery(gcmd)
+                batch_samples.append(z)
+                total_taken += 1
+
+                # IMPORTANT: always release the switch between samples
+                toolhead.wait_moves()
+                cur = toolhead.get_position()
+                target_z = max(cur[2] + self.recover_lift_mm, self.safe_start_z)
+                toolhead.manual_move([None, None, target_z], self.z_move_speed)
+                toolhead.wait_moves()
+
+            spread = max(batch_samples) - min(batch_samples)
+            last_spread = spread
+            if spread <= tolerance:
+                return median(batch_samples)
+
+
+                # IMPORTANT: always release the switch between samples
+                toolhead.wait_moves()
+                cur = toolhead.get_position()
+                target_z = max(cur[2] + self.recover_lift_mm, self.safe_start_z)
+                toolhead.manual_move([None, None, target_z], self.z_move_speed)
+                toolhead.wait_moves()
+
+            spread = max(batch_samples) - min(batch_samples)
+            last_spread = spread
+            if spread <= tolerance:
+                return median(batch_samples)
+
+
+                # IMPORTANT: always release the switch between samples
+                toolhead.wait_moves()
+                cur = toolhead.get_position()
+                target_z = max(cur[2] + self.recover_lift_mm, self.safe_start_z)
+                toolhead.manual_move([None, None, target_z], self.z_move_speed)
+                toolhead.wait_moves()
+
+            spread = max(batch_samples) - min(batch_samples)
+            last_spread = spread
+            if spread <= tolerance:
+                return sum(batch_samples) / len(batch_samples)
 
         attempted_batches = max_count // requested
         raise gcmd.error(
@@ -239,10 +352,9 @@ class Axiscope:
             gcmd.respond_error("No valid tools selected")
             return
 
-        # Always include T0 reference probing when available.
-        # Users can deselect other tools, but T0 stays mandatory for a fresh baseline.
-        if 0 in available_tools and 0 not in ordered_tools:
-            ordered_tools = [0] + ordered_tools
+        # Always probe the reference tool first so all offsets are from fresh data.
+        if 0 in available_tools:
+            ordered_tools = [0] + [tool for tool in ordered_tools if tool != 0]
 
         for tool in ordered_tools:
             self.cmd_AXISCOPE_BEFORE_PICKUP_GCODE(gcmd)

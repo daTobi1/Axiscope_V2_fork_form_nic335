@@ -1,6 +1,6 @@
 import os
 import ast
-from statistics import median
+from statistics import median, mean
 
 from . import tools_calibrate
 from . import toolchanger
@@ -22,17 +22,30 @@ class Axiscope:
         self.move_speed    = config.getint('move_speed', 60)
         self.z_move_speed  = config.getint('z_move_speed', 10)
 
+        # Samples are defined via config
         self.samples               = config.getint('samples', 10)
         self.samples_tolerance     = config.getfloat('samples_tolerance', 0.02, minval=0.)
         self.samples_max_count     = config.getint('samples_max_count', self.samples, minval=self.samples)
 
+        # Z trigger calc method (median|average|trimmed)
+        self.z_calc_method = (config.get('z_calc_method', 'median') or 'median').strip().lower()
+        if self.z_calc_method not in ('median', 'average', 'avg', 'mean', 'trimmed', 'trim', 'trimmed_mean'):
+            raise config.error("axiscope: z_calc_method must be one of: median, average, trimmed")
+
+        # how many values to trim on each side for trimmed mean
+        self.z_trim_count = config.getint('z_trim_count', 1, minval=0)
+
         self.pin              = config.get('pin', None)
         self.config_file_path = config.get('config_file_path', None)
 
-        # Recovery gegen "Probe triggered prior to movement"
+        # Recovery against "Probe triggered prior to movement"
         self.recover_lift_mm      = config.getfloat('recover_lift_mm', 2.0, minval=0.)
         self.recover_pause_ms     = config.getint('recover_pause_ms', 150, minval=0)
         self.recover_max_attempts = config.getint('recover_max_attempts', 4, minval=1)
+
+        # Default reference tool for Z (UI default should be T0 if exists)
+        self.default_ref_tool = config.getint('default_ref_tool', 0, minval=0)
+        self.last_ref_tool = self.default_ref_tool
 
         self.gcode_macro = self.printer.load_object(config, 'gcode_macro')
         self.start_gcode = self.gcode_macro.load_template(config, 'start_gcode', '')
@@ -94,6 +107,9 @@ class Axiscope:
             'probe_results': self.probe_results,
             'has_cfg_data': self.has_cfg_data,
             'has_switch_pos': self.has_switch_pos(),
+            'z_calc_method': self.z_calc_method,
+            'z_trim_count': self.z_trim_count,
+            'ref_tool': self.last_ref_tool,
         }
 
     def cmd_MOVE_TO_ZSWITCH(self, gcmd):
@@ -123,8 +139,6 @@ class Axiscope:
         toolhead = self.printer.lookup_object('toolhead')
         last_err = None
 
-        # Force a single low-level probe sample per call.
-        # Axiscope handles batching/tolerance itself in _probe_zswitch().
         probe_gcmd = self.gcode.create_gcode_command(
             "PROBE_ZSWITCH", "PROBE_ZSWITCH",
             {'SAMPLES': 1, 'SAMPLES_TOLERANCE': 0.0, 'SAMPLES_MAX_COUNT': 1}
@@ -151,7 +165,31 @@ class Axiscope:
 
         raise gcmd.error(f"Axiscope: Probe still triggered after recovery. {last_err}")
 
-    # Release the switch between samples and evaluate in batches.
+    def _effective_calc_method(self, gcmd):
+        method = (gcmd.get('Z_CALC', self.z_calc_method) or self.z_calc_method).strip().lower()
+        if method in ('avg', 'mean'):
+            return 'average'
+        if method in ('trim', 'trimmed_mean'):
+            return 'trimmed'
+        if method in ('median', 'average', 'trimmed'):
+            return method
+        return 'median'
+
+    def _calc_value(self, samples, method):
+        if method == 'average':
+            return mean(samples)
+        if method == 'trimmed':
+            trim = int(self.z_trim_count)
+            n = len(samples)
+            if trim <= 0:
+                return mean(samples)
+            if n <= 2 * trim:
+                return median(samples)
+            s = sorted(samples)
+            s2 = s[trim:n-trim]
+            return mean(s2)
+        return median(samples)
+
     def _probe_zswitch(self, gcmd):
         requested = gcmd.get_int('SAMPLES', self.samples, minval=1)
         max_count = gcmd.get_int('SAMPLES_MAX_COUNT', self.samples_max_count, minval=requested)
@@ -161,8 +199,6 @@ class Axiscope:
         total_taken = 0
         last_spread = None
 
-        # Evaluate tolerance per batch of `requested` probes.
-        # If a batch fails tolerance, discard it and run a fresh batch.
         while total_taken + requested <= max_count:
             batch_samples = []
 
@@ -171,7 +207,6 @@ class Axiscope:
                 batch_samples.append(z)
                 total_taken += 1
 
-                # IMPORTANT: always release the switch between samples
                 toolhead.wait_moves()
                 cur = toolhead.get_position()
                 target_z = max(cur[2] + self.recover_lift_mm, self.safe_start_z)
@@ -181,7 +216,8 @@ class Axiscope:
             spread = max(batch_samples) - min(batch_samples)
             last_spread = spread
             if spread <= tolerance:
-                return median(batch_samples)
+                method = self._effective_calc_method(gcmd)
+                return self._calc_value(batch_samples, method)
 
         attempted_batches = max_count // requested
         raise gcmd.error(
@@ -197,14 +233,10 @@ class Axiscope:
         z = self._probe_zswitch(gcmd)
         t = self.printer.get_reactor().monotonic()
 
-        if tool_no == "0":
-            self.probe_results[tool_no] = {'z_trigger': z, 'z_offset': 0, 'last_run': t}
-        elif "0" in self.probe_results:
-            # FIX: Correct sign. Offset should be tool_z - reference_z (NOT reference_z - tool_z)
-            z_offset = z - self.probe_results["0"]['z_trigger']
-            self.probe_results[tool_no] = {'z_trigger': z, 'z_offset': z_offset, 'last_run': t}
-        else:
-            self.probe_results[tool_no] = {'z_trigger': z, 'z_offset': 0, 'last_run': t}
+        # Neutral: only store trigger; offset is set by CALIBRATE_ALL_Z_OFFSETS referencing logic.
+        if tool_no not in self.probe_results:
+            self.probe_results[tool_no] = {}
+        self.probe_results[tool_no].update({'z_trigger': z, 'z_offset': 0.0, 'last_run': t})
 
         toolhead.move(start_pos, self.z_move_speed)
         toolhead.set_position(start_pos)
@@ -217,6 +249,17 @@ class Axiscope:
 
         self.cmd_AXISCOPE_START_GCODE(gcmd)
 
+        z_calc = (gcmd.get('Z_CALC', None) or '').strip().lower()
+        if z_calc and z_calc not in ('median', 'average', 'avg', 'mean', 'trimmed', 'trim', 'trimmed_mean'):
+            gcmd.respond_error("Invalid Z_CALC. Use median, average or trimmed")
+            return
+
+        effective_method = self._effective_calc_method(gcmd)
+        origin = "override" if z_calc else "config default"
+
+        self.gcode.respond_info(f"Axiscope: Z calculation method = {effective_method} ({origin})")
+        self.gcode.run_script_from_command(f"M118 Axiscope: Z calc = {effective_method} ({origin})")
+
         selected_tools = gcmd.get('TOOLS', None)
         if selected_tools:
             requested = []
@@ -227,12 +270,26 @@ class Axiscope:
         else:
             requested = list(self.toolchanger.tool_numbers)
 
-        # Keep only existing tools and de-duplicate while preserving order
-        available_tools = set(self.toolchanger.tool_numbers)
+        # Sorted list for stable fallback behavior
+        available_tools = sorted(self.toolchanger.tool_numbers)
+        if not available_tools:
+            gcmd.respond_error("No tools available")
+            return
+
+        # Reference tool with fallback:
+        # - prefer gcmd REF
+        # - else prefer config default_ref_tool
+        # - if that doesn't exist -> fallback to smallest tool number
+        ref_tool = gcmd.get_int('REF', self.default_ref_tool, minval=0)
+        if ref_tool not in available_tools:
+            ref_tool = available_tools[0]
+
+        # Build ordered tool list
+        available_set = set(available_tools)
         ordered_tools = []
         seen = set()
         for tool in requested:
-            if tool in available_tools and tool not in seen:
+            if tool in available_set and tool not in seen:
                 seen.add(tool)
                 ordered_tools.append(tool)
 
@@ -240,9 +297,16 @@ class Axiscope:
             gcmd.respond_error("No valid tools selected")
             return
 
-        # Always probe the reference tool first so all offsets are from fresh data.
-        if 0 in available_tools:
-            ordered_tools = [0] + [tool for tool in ordered_tools if tool != 0]
+        # Ensure reference is included and first
+        if ref_tool not in ordered_tools:
+            ordered_tools.insert(0, ref_tool)
+        ordered_tools = [ref_tool] + [t for t in ordered_tools if t != ref_tool]
+
+        self.last_ref_tool = ref_tool
+
+        # Clean run
+        self.probe_results = {}
+        ref_trigger = None
 
         for tool in ordered_tools:
             self.cmd_AXISCOPE_BEFORE_PICKUP_GCODE(gcmd)
@@ -250,11 +314,29 @@ class Axiscope:
             self.cmd_AXISCOPE_AFTER_PICKUP_GCODE(gcmd)
 
             self.gcode.run_script_from_command("MOVE_TO_ZSWITCH")
+
+            z_calc_arg = f" Z_CALC={z_calc}" if z_calc else ""
             self.gcode.run_script_from_command(
                 f"PROBE_ZSWITCH SAMPLES={self.samples} "
                 f"SAMPLES_TOLERANCE={self.samples_tolerance} "
-                f"SAMPLES_MAX_COUNT={self.samples_max_count}"
+                f"SAMPLES_MAX_COUNT={self.samples_max_count}" + z_calc_arg
             )
+
+            # Re-reference offsets to REF tool
+            key = str(tool)
+            if key in self.probe_results:
+                z_trig = self.probe_results[key]['z_trigger']
+
+                if tool == ref_tool:
+                    ref_trigger = z_trig
+                    self.probe_results[key]['z_offset'] = 0.0
+                    self.probe_results[key]['ref_tool'] = ref_tool
+                else:
+                    if ref_trigger is None:
+                        self.probe_results[key]['z_offset'] = 0.0
+                    else:
+                        self.probe_results[key]['z_offset'] = z_trig - ref_trigger
+                    self.probe_results[key]['ref_tool'] = ref_tool
 
         self.cmd_AXISCOPE_FINISH_GCODE(gcmd)
 

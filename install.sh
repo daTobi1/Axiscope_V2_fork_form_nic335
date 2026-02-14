@@ -3,7 +3,7 @@
 # Default values
 AXISCOPE_ENV="axiscope-env"
 INSTALL_DIR="$HOME/axiscope"
-REPO_URL="https://github.com/nic335/Axiscope.git"
+REPO_URL="https://github.com/daTobi1/Axsiscope-V2.git"
 BRANCH="main"
 
 # Parse command line arguments
@@ -98,7 +98,7 @@ fi
 # Install Python dependencies
 echo "Installing Python dependencies..."
 pip install --upgrade pip
-pip install flask waitress  # Install Flask and Waitress WSGI server
+pip install flask waitress
 
 # Create the service file
 echo "Creating service file..."
@@ -123,41 +123,32 @@ RestartSec=1
 WantedBy=multi-user.target
 EOL
 
-# Verify service file was created correctly
 if [ ! -f "${SERVICE_FILE}" ]; then
     echo "Failed to create service file"
     exit 1
 fi
 
-# Install service file
 echo "Installing service file..."
 sudo cp "${SERVICE_FILE}" /etc/systemd/system/
 sudo systemctl daemon-reload
 
-# Add to moonraker allowed services
 echo "Adding to moonraker.asvc..."
 ASVC_FILE="${HOME}/printer_data/moonraker.asvc"
 
-# Create file if it doesn't exist
 if [ ! -f "${ASVC_FILE}" ]; then
     touch "${ASVC_FILE}"
 fi
 
-# Check if axiscope is already in the file
 if ! grep -q "^axiscope$" "${ASVC_FILE}"; then
-    # Ensure there's a newline at the end of file
     [ -s "${ASVC_FILE}" ] && echo >> "${ASVC_FILE}"
-    # Add axiscope
     echo "axiscope" >> "${ASVC_FILE}"
     echo "Added axiscope to moonraker.asvc"
 else
     echo "axiscope already in moonraker.asvc"
 fi
 
-# Add update manager configuration
 echo "Adding update manager configuration..."
 if [ -f "${HOME}/printer_data/config/moonraker.conf" ]; then
-    # Check if the section already exists
     if ! grep -q "\[update_manager axiscope\]" "${HOME}/printer_data/config/moonraker.conf"; then
         cat >> "${HOME}/printer_data/config/moonraker.conf" << EOL
 
@@ -178,28 +169,21 @@ else
     echo "Warning: moonraker.conf not found in expected location"
 fi
 
-# Reload systemd and enable the service
 echo "Reloading systemd..."
 sudo systemctl daemon-reload
 
-# Enable and start the service
 echo "Enabling and starting AxisScope service..."
 sudo systemctl enable axiscope.service
-# sudo systemctl start axiscope.service
 
-# Restart moonraker to recognize the new service
-echo "Restarting moonraker to recognize the new service..."
+echo "Restarting moonraker..."
 sudo systemctl restart moonraker
 
-# Add symlink of axiscope into klipper/klippy/extras and restart klipper
-echo "Adding symlink of axiscope into klipper/klippy/extras... and restarting klipper"
+echo "Adding symlink into klipper extras..."
 sudo ln -s ${HOME}/axiscope/klippy/extras/axiscope.py ${HOME}/klipper/klippy/extras/axiscope.py
 sudo systemctl restart klipper
 
 echo "Installation complete!"
 echo "AxisScope service has been enabled"
-echo "The service can be controlled through Mainsail's service control popup"
 
-# Get and display the printer's IP address
 PRINTER_IP=$(hostname -I | awk '{print $1}')
 echo "When running, it will be hosted at http://${PRINTER_IP}:3000"

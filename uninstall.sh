@@ -6,6 +6,7 @@ INSTALL_DIR="$HOME/axiscope"
 SERVICE_NAME="axiscope.service"
 MOONRAKER_CONF="$HOME/printer_data/config/moonraker.conf"
 MOONRAKER_ASVC="$HOME/printer_data/moonraker.asvc"
+KLIPPER_EXTRAS="$HOME/klipper/klippy/extras/axiscope.py"
 
 echo "Uninstalling AxisScope..."
 
@@ -47,21 +48,27 @@ if [ -f "${MOONRAKER_ASVC}" ]; then
     sed -i '/^axiscope$/d' "${MOONRAKER_ASVC}"
 fi
 
-# Remove update manager configuration from moonraker.conf
+# Remove update_manager block cleanly
 if [ -f "${MOONRAKER_CONF}" ]; then
     echo "Removing update manager configuration..."
-    sed -i '/\[update_manager axiscope\]/,/\[\|^$/!{/\[update_manager axiscope\]/,/^$/d}' "${MOONRAKER_CONF}"
+    awk '
+        BEGIN{skip=0}
+        /^\[update_manager axiscope\]/{skip=1; next}
+        /^\[.*\]/{if(skip==1){skip=0}}
+        skip==0{print}
+    ' "${MOONRAKER_CONF}" > "${MOONRAKER_CONF}.tmp"
+    mv "${MOONRAKER_CONF}.tmp" "${MOONRAKER_CONF}"
 fi
 
 # Remove symlink from klipper extras
 echo "Removing symlink from klipper extras..."
-if [ -L "${HOME}/klipper/klippy/extras/axiscope.py" ]; then
-    sudo rm -f "${HOME}/klipper/klippy/extras/axiscope.py"
+if [ -L "${KLIPPER_EXTRAS}" ]; then
+    sudo rm -f "${KLIPPER_EXTRAS}"
 fi
 
 # Restart services
 echo "Restarting services..."
-sudo systemctl restart moonraker
-sudo systemctl restart klipper
+sudo systemctl restart moonraker 2>/dev/null || true
+sudo systemctl restart klipper 2>/dev/null || true
 
-echo "AxisScope has been uninstalled successfully!"
+echo "AxisScope (Axsiscope-V2) has been uninstalled successfully!"

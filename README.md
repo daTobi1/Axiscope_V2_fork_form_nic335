@@ -139,7 +139,7 @@ z_move_speed: 6
 # Sampling / Accuracy
 # -------------------------------------------------
 # Target number of samples per batch
-samples: 5
+samples: 5  # if us "trimmed" this count must be minimum 5
 
 # Maximum allowed deviation within a batch (mm)
 samples_tolerance: 0.005
